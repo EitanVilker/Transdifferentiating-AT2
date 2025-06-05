@@ -21,6 +21,7 @@ from matplotlib.patches import Patch
 import anndata as ad
 
 def loadMCKOBasis():
+    print("Loading...")
     basis = top.load_basis("MC-KO", 50)
     cleanedBasis = basis[0]
     cleanedBasis = cleanedBasis[[colName for colName in cleanedBasis.columns if "Lung" in colName]]
@@ -73,7 +74,8 @@ def loadHumanBasis(filtering=True, includeRas=False):
     print("Loaded basis!")
     return humanBasis
 
-def processDataset(datasetName, restrictColumnsTo=[], simplifying=False, keepAll=False, filteringAnnObject=True, buildingUp=False, normalized=False):
+
+def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnObject=True, buildingUp=False, normalized=False, useAverage=False):
     cell_type_column, toKeep, filePath = getDatasetSepcificInfo(datasetName)
 
     print("Processing dataset...")
@@ -93,7 +95,7 @@ def processDataset(datasetName, restrictColumnsTo=[], simplifying=False, keepAll
     else:
         annObject = sc.read_h5ad(filePath)
 
-    if filteringAnnObject:
+    if filteringAnnObject and not keepAll:
         annObject = annObject[annObject.obs[cell_type_column].isin(toKeep)]
         
     print("Created Ann Object!")
@@ -102,11 +104,11 @@ def processDataset(datasetName, restrictColumnsTo=[], simplifying=False, keepAll
     metadata = annObject.obs
     clusters = metadata[cell_type_column].values
     if not normalized:
-        processedData = top.process(df)
+        processedData = top.process(df, average=useAverage)
     else:
         processedData = df
     print("Created scTOP processed data")
-    annotations = setSourceAnnotations(clusters, toKeep, keepAll=keepAll, simplifying=True)
+    annotations = setSourceAnnotations(clusters, toKeep, keepAll=keepAll, simplifying=False)
     kwargs = setArguments(annotations[annotations!='Other'])
 
     return annObject, df, metadata, processedData, annotations, kwargs, toKeep
@@ -141,6 +143,10 @@ def getDatasetSepcificInfo(dataset):
         filePath = "../Habermann/Habermann.h5ad"
         cell_type_column = "celltype"
         toKeep = ["AT1", "AT2", "KRT5-/KRT17+", "Proliferating Epithelial Cells", "Transitional AT2", "SCGB3A2+", "SCGB3A2+ SCGB1A1+"]
+    elif dataset == "Bibek":
+        filePath = "../BibekPneumonectomy/Bibek.h5ad"
+        cell_type_column = "annotation_update"
+        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
 
     return cell_type_column, toKeep, filePath
 
@@ -165,6 +171,28 @@ def setSourceAnnotations(clusters, keepList, keepAll=False, simplifying=False):
             sourceAnnotations.append("Other")
 
     return np.array(sourceAnnotations)
+
+
+# Get average projections given time series data
+def getTimeAveragedProjections(basis, df, cellLabels, times, timeSortFunc, substituteMap=None):
+
+    projections = {}
+    processedData = {}
+    timesSorted = sorted([str(time) for time in set(times)], key=timeSortFunc)
+
+    for time in tqdm(timesSorted):
+        types = pd.DataFrame(cellLabels.value_counts())
+        for current_type in list(types.index):
+            current_processed = top.process(df.loc[:, np.logical_and(times==time, cellLabels == current_type)], average=True)
+            processedData[current_type] = current_processed
+            current_scores = top.score(basis, current_processed)
+            if substituteMap is not None:
+                projectionKey = substituteMap[current_type] + "_" + time
+            else:
+                projectionKey = current_type + "_" + time
+            projections[projectionKey] = current_scores
+    
+    return projections
 
 
 def getEmbedding(data):
@@ -433,13 +461,15 @@ def plot_two(projections, celltype1, celltype2,
              minSimilarity=-0.1, maxSimilarity=0.4, legendFontSize=16, **kwargs):
 
     ax = ax or plt.gca()
-
+    x = projections.loc[celltype1]
+    y = projections.loc[celltype2]
+    
     if gene:
         palette = create_colorbar(gene_expressions.loc[gene],
                                   '{} expression'.format(gene), ax=ax)
 
-        plot = sns.scatterplot(x=projections.loc[celltype1],
-                               y=projections.loc[celltype2],
+        plot = sns.scatterplot(x=x,
+                               y=y,
                                hue=gene_expressions.loc[gene],
                                palette=palette,
                                alpha=0.5,
@@ -449,26 +479,26 @@ def plot_two(projections, celltype1, celltype2,
         plot.legend_.remove()
 
     else:
-        x = projections.loc[celltype1]
-        y = projections.loc[celltype2]
-        ax.axvline(x=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
-        ax.axhline(y=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
+
         if palette is None or markers is None:
             plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
         else:
             plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-
-        if title is not None:
-            ax.set_title(title)
         ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
-        ax.set_xlim(minSimilarity, maxSimilarity)
-        ax.set_ylim(minSimilarity, maxSimilarity)
+        
+    if title is not None:
+        ax.set_title(title)
+    ax.axvline(x=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
+    ax.axhline(y=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
+    ax.set_xlim(minSimilarity, maxSimilarity)
+    ax.set_ylim(minSimilarity, maxSimilarity)
 
     return sns.color_palette()
 
 
 # Plot multiple 2D similarity plots at once based on some field, such as time
-def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCategory, subsetNames, legendFontSize=16, minSimilarity=-0.1, maxSimilarity=0.4):
+def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCategory, subsetNames, legendFontSize=16, minSimilarity=-0.1, maxSimilarity=0.4, 
+                      gene=None, sourceData=None):
 
     # Get subplots
     subsetCount = len(subsetNames)
@@ -477,8 +507,8 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
     fig, axes = plt.subplots(dimX, dimY, figsize=(8 * dimX, 8 * dimY), layout="constrained")
 
     # Set up label colors and shapes
-    colors = list(sns.color_palette("bright"))
-    markers = ["X", "o", "^", "s", "d", "p", "*"]
+    colors = list(sns.color_palette("bright")) + list(sns.color_palette())
+    markers = ["X", "o", "^", "s", "d", "p", "*", "+", "1", "2", "3", "4", "<", ">", "|", "_", "v", "H", "h", "D", "x", ".", ","]
     labels = [str(label) for label in set(annotations) if label != "Other"]
     labelColorMap = {}
     labelMarkerMap = {}
@@ -488,8 +518,16 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
 
     # Plot for each subset
     for i, ax in enumerate(axes.flat):
+        if i >= subsetCount: 
+            fig.delaxes(ax)
+            continue
         subset = subsetNames[i]
         toInclude = np.logical_and(annotations!='Other', subsetCategory==subset)
+        # toInclude = subsetCategory==subset
+        if sourceData is not None:
+            geneExpressions = sourceData.loc[:, toInclude]
+        else:
+            geneExpressions = None
         plot_two(
                 projections.loc[:, toInclude],
                 celltype1, celltype2,
@@ -501,7 +539,8 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
                 legendFontSize = legendFontSize,
                 minSimilarity = minSimilarity, maxSimilarity = maxSimilarity,
                 s=60, 
-                style=annotations[toInclude]
+                style=annotations[toInclude],
+                gene=gene, gene_expressions=geneExpressions
         )
 
     return fig, axes
@@ -594,7 +633,7 @@ def plot_proportions(categories, times, timeSortFunc, rawCounts=False):
     categoriesSorted = sorted([str(category) for category in set(categories)])
     valueCountsFrame = pd.DataFrame({"Category": categoriesSorted})
     categories = np.array(categories)
-    highestSum = 0
+    maxY = 0
 
     # Collect the proportions of each category for each time
     for time in timesSorted:
@@ -602,12 +641,15 @@ def plot_proportions(categories, times, timeSortFunc, rawCounts=False):
         values, counts = np.unique(currentCategories, return_counts=True)
         values = [str(value) for value in values]
         countsSum = sum(counts)
-        if countsSum > highestSum:
-            highestSum = countsSum
+
         if not rawCounts:
             countProportions = [float(count/countsSum) for count in counts]
+            maxY = 1
         else:
+            if countsSum > maxY:
+                maxY = countsSum
             countProportions = [int(count) for count in counts]
+            
         valueCountsMap = dict(zip(values, countProportions))
         proportions = []
         for label in categoriesSorted:
@@ -623,7 +665,7 @@ def plot_proportions(categories, times, timeSortFunc, rawCounts=False):
     ax.stackplot(timesSorted, valueCountsFrame.to_numpy(), labels=valueCountsFrame.index)
     ax.legend(bbox_to_anchor=(1.05, 1.0))
     ax.set_xlim(timesSorted[0], timesSorted[-1])
-    ax.set_ylim(0, highestSum)
+    ax.set_ylim(0, maxY)
 
     return fig, ax
 
