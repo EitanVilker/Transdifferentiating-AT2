@@ -69,9 +69,12 @@ def getInternalCorrelationManyToMany(cluster):
     correlationList = []
     geneCount = len(cluster.index)
 
-    for i in range(geneCount - 1):
+    for i in range(geneCount):
         gene1Series = filterDFByGenes(cluster, cluster.index[i])
-        for j in range(i + 1, geneCount):
+        for j in range(geneCount):
+            if i == j:
+                # continue
+                pass
             gene2Series = filterDFByGenes(cluster, cluster.index[j])
 
             corr = gene1Series.corr(gene2Series)
@@ -80,7 +83,8 @@ def getInternalCorrelationManyToMany(cluster):
             else:
                 correlationList.append(abs(corr))
 
-    return sum(correlationList) / geneCount**2 #, statistics.mean(correlationList)
+    # return sum(correlationList) / geneCount
+    return sum(correlationList) / geneCount**2
 
 
 def getExternalCorrelationOneToMany(df, timeName, timeValues, geneOfInterest,
@@ -162,7 +166,7 @@ def getExternalCorrelationManyToMany(df, timeName, timeValues,
     print("Calculating correlations...")
     for geneOut in outDF.index:
         i += 1
-        if i % 500 == 0:
+        if i % 1000 == 0:
             print(i)
 
         geneOutSeries = filterDFByGenes(outDF, geneOut)
@@ -173,7 +177,8 @@ def getExternalCorrelationManyToMany(df, timeName, timeValues,
             if not math.isnan(corr):
                 correlationList.append(abs(corr))
 
-    return sum(correlationList) / (len(inDF.index) * (len(df.index) - len(inDF.index))) #correlationList, len(df.index)
+    # return sum(correlationList) / len(df.index)
+    return sum(correlationList) / (len(inDF.index) * len(outDF.index))
 
 
 def getIScore(cluster, clusterList, gene, timePoint=None):
@@ -200,4 +205,27 @@ def getCellEntropy():
     pass
 
 
-def getGeneEntropy(df, gene)
+def getGeneEntropy(df, gene, timeName=None, timeValues=None):
+    if timeName is not None and timeValues is not None:
+        geneSeries = df.loc[gene, timeValues==timeName]
+    else:
+        geneSeries = filterDFByGenes(df, gene)
+
+    # totalGeneCount = np.sum(geneSeries)
+    # print(totalGeneCount)
+    # if totalGeneCount == 0:
+    #     return 0
+    geneSeriesLength = len(geneSeries)
+
+    hist, bins = np.histogram(geneSeries, bins=geneSeriesLength // 2)
+    totalEntropy = 0
+    for sample in hist:
+        if sample != 0:
+            # p = sample / totalGeneCount
+            # p = sample / (binCount)
+            p = sample / geneSeriesLength
+            totalEntropy += math.log2(p) * p
+    return -1 * totalEntropy
+
+
+

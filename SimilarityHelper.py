@@ -19,7 +19,10 @@ from sklearn.linear_model import LinearRegression
 from matplotlib.patches import Ellipse
 from matplotlib.patches import Patch
 import anndata as ad
+from scipy.sparse import csr_matrix
+import hdf5plugin
 
+# Function to get the MC-KO basis made by Michael Herriges in the Kotton Lab with only mouse lung epithelial cells
 def loadMCKOBasis():
     print("Loading...")
     basis = top.load_basis("MC-KO", 50)
@@ -37,6 +40,7 @@ def loadMCKOBasis():
     cleanedBasis = cleanedBasis.rename(columns=newCols)
     return cleanedBasis
 
+# Function to make a basis using Emma Rawlins mouse lung data
 def loadRawlins(file='/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad', cell_type_column = 'new_celltype', filtering=False):
     # toExclude = ["Alveolar fibro", "Interm fibro", "Adventitial fibro", "SPP1+ MΦ", "Pericyte", "Late tip"]
     # toExclude = ["Alveolar fibro"]
@@ -49,11 +53,12 @@ def loadRawlins(file='/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andre
     rawlins_df = pd.DataFrame(rawlins.X.toarray(), index = rawlins.obs.index , columns = rawlins.var.index).T
     return rawlins, rawlins_df, cell_type_column
 
+# Function to make a basis using LungMap human data
 def loadHumanBasis(filtering=True, includeRas=False):
     with h5py.File('/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/scripts/humanBasis.h5', "r") as f:
-        cellTypes = f["df"]["axis0"][:]  # Load expression data (ensure it's a NumPy array)
-        var = f["df"]["axis1"][:]  # Load expression data (ensure it's a NumPy array)
-        X = f["df"]["block0_values"][:]  # Load expression data (ensure it's a NumPy array)
+        cellTypes = f["df"]["axis0"][:]
+        var = f["df"]["axis1"][:]
+        X = f["df"]["block0_values"][:]
 
     humanBasis = pd.DataFrame(X)
     humanBasis.columns = [col.decode() for col in cellTypes]
@@ -74,11 +79,12 @@ def loadHumanBasis(filtering=True, includeRas=False):
     print("Loaded basis!")
     return humanBasis
 
-
+# Function to get the AnnObject and associated objects for a test dataset, with additional handling if there is no h5ad file
 def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnObject=True, buildingUp=False, normalized=False, useAverage=False):
     cell_type_column, toKeep, filePath = getDatasetSepcificInfo(datasetName)
 
     print("Processing dataset...")
+    # If there is no h5ad, assemble AnnData objet
     if buildingUp:
         if datasetName == "Kobayashi":
             matrix = pd.read_csv(filePath + '/rawcounts.mtx')
@@ -113,7 +119,7 @@ def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnOb
 
     return annObject, df, metadata, processedData, annotations, kwargs, toKeep
 
-
+# Get the info needed to load the specific test set
 def getDatasetSepcificInfo(dataset):
     if dataset == "Kostas":
         filePath = "../Kostas/Kostas.h5ad"
@@ -150,6 +156,7 @@ def getDatasetSepcificInfo(dataset):
 
     return cell_type_column, toKeep, filePath
 
+# Set the labels for the given cluster
 def setSourceAnnotations(clusters, keepList, keepAll=False, simplifying=False):
     sourceAnnotations = []
     for val in clusters:
@@ -171,6 +178,20 @@ def setSourceAnnotations(clusters, keepList, keepAll=False, simplifying=False):
             sourceAnnotations.append("Other")
 
     return np.array(sourceAnnotations)
+
+
+# Write an AnnData object to an h5ad file
+def writeAnnDataObject(annDataObj, outFile):
+    obj = annDataObj
+    obj.X = csr_matrix(obj.X)
+    # varFrame = pd.DataFrame(index=obj.var.index)
+    # obj.var.index = varFrame
+    # obj.var.drop(columns=obj.var.columns, inplace=True)
+    if obj.raw is not None:
+        obj._raw._var.rename(columns={'_index': 'index'}, inplace=True)    
+        obj.raw.var.index.name(columns={'_index': 'index'}, inplace=True)    
+        obj.write_h5ad(outFile)
+    print("Finished!")
 
 
 # Get average projections given time series data
@@ -195,6 +216,7 @@ def getTimeAveragedProjections(basis, df, cellLabels, times, timeSortFunc, subst
     return projections
 
 
+# Get the UMAP info
 def getEmbedding(data):
     pca = PCA(100)
     PCA_data = pca.fit_transform(data.T)
@@ -204,6 +226,7 @@ def getEmbedding(data):
     return embedding
 
 
+# Using any dataset with well-defined clusters, set it as a basis
 def setBasis(basis_df, basis_metadata, cell_type_column = 'labeled_clusters'):
 
     # Count the number of cells per type
@@ -237,13 +260,14 @@ def setBasis(basis_df, basis_metadata, cell_type_column = 'labeled_clusters'):
     return basis
 
 
+# Add the desired columns of a smaller basis to a primary basis
 def combineBases(basis1, df, metadata, colsToKeep, cell_type_column='labeled_clusters'):
     basis2 = setBasis(df, metadata, cell_type_column=cell_type_column)
     basis1.index.name = basis2.index.name
     return pd.merge(basis1, basis2[colsToKeep], on=basis1.index.name, how="inner")
 
         
-
+# First step of testing the accuracy of a basis. Trains a basis and outputs holdouts 
 def testBasis1(basis_df, basis_metadata, cell_type_column='labeled_clusters'):
 
     # Count the number of cells per type
@@ -280,6 +304,8 @@ def testBasis1(basis_df, basis_metadata, cell_type_column='labeled_clusters'):
     split_IDs = np.array_split(test_IDs, 10) # I split this test dataset because it's very large and took up a lot of memory -- you don't need to do this if you have enough memory to test the entire dataset at once
     return trainBasis, test_IDs, split_IDs
 
+
+# Second step of testing a basis, using the outputs of the first step. Optionally adjust the minimum accuracy threshold
 def testBasis2(trainBasis, basis_df, test_IDs, split_IDs, basis_metadata, cell_type_column, specification_value=0.1):
     print("Processing test data...")
     accuracies = {'top1': 0,
@@ -302,6 +328,7 @@ def testBasis2(trainBasis, basis_df, test_IDs, split_IDs, basis_metadata, cell_t
     return accuracies, matches, misses
 
 
+# Get the metrics for a given projection. Optionally adjust the minimum accuracy threshold
 def scoreProjections(accuracies, matches, misses, projections, metadata, cell_type_column, specification_value=0.1):
     # cells with maximum projection under this value are considered "unspecified"
 
@@ -337,11 +364,11 @@ def scoreProjections(accuracies, matches, misses, projections, metadata, cell_ty
                 misses[true_type] += 1
         if true_type in types_sorted_by_projections[:3]:
             accuracies['top3'] += 1
-    # for key, value in accuracies.items():
-    #     print("{}: {}".format(key, value/len(test_IDs)))
+
     return accuracies, matches, misses
 
 
+# Get dict of cell types in the source to the counts of cell types in the basis they were most similar to
 def getTopPredictedMap(projections, metadata, cell_type_column="cell_type"):
     topPredictedMap = {}
     for sample_id, sample_projections in projections.items():
@@ -355,6 +382,7 @@ def getTopPredictedMap(projections, metadata, cell_type_column="cell_type"):
     return topPredictedMap
 
 
+# Get a dict of cell types in basis to the similarity scores of each type in the source
 def getMatchingProjections(projections, metadata, cell_type_column, basisKeep, sourceKeep, prefix=None):
 
     similarityMap = {}
@@ -384,6 +412,7 @@ def getMatchingProjections(projections, metadata, cell_type_column, basisKeep, s
                 similarityMap[label][adjustedTrueLabel].append(similarityScore)
 
     return similarityMap
+
 
 # =========================
 # Define plotting functions
@@ -670,6 +699,7 @@ def plot_proportions(categories, times, timeSortFunc, rawCounts=False):
     return fig, ax
 
 
+# Create similarity plot with two populations shown on the same axes 
 def compare_populations(ax, celltype1, celltype2, scores_dict):
 
     color_dict = {}
@@ -723,6 +753,7 @@ def compare_populations(ax, celltype1, celltype2, scores_dict):
     plt.legend(handles=legend_elements)
 
 
+# Get the ellipse most closely describing a cluster
 def getEllipse(projections, annotations, targetLabel, colorMap, palette, axis1, axis2):
     centroids = {"x": [], "y": []}
     labelMap = {}
@@ -758,6 +789,7 @@ def getEllipse(projections, annotations, targetLabel, colorMap, palette, axis1, 
                    color=palette[colorMap[targetLabel]], linewidth=2)
 
 
+# Create dict between cell annotations and integers representing fixed colors
 def getLabelColorMap(annotations, includeOther=True):
     labelColorOrderMap = {}
     i = 0
@@ -769,6 +801,7 @@ def getLabelColorMap(annotations, includeOther=True):
     return labelColorOrderMap
 
 
+# Create a boxplot of the similarities between any number of sources and a basis
 def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=None, labelIdxStartMap=None):
     num_groups = len(trueLabels)  # Number of groups
     num_boxes_per_group = len(basisLabels)  # Number of boxplots per group
