@@ -1,3 +1,6 @@
+### File containing functions for working with scTOP, made by Maria Yampolskaya and Pankaj Mehta
+# Author: Eitan Vilker
+
 import numpy as np
 import pandas as pd
 import numpy as np
@@ -22,7 +25,24 @@ import anndata as ad
 from scipy.sparse import csr_matrix
 import hdf5plugin
 
-# Function to get the MC-KO basis made by Michael Herriges in the Kotton Lab with only mouse lung epithelial cells
+
+# Gets AnnObject and basis df given h5ad file
+def loadBasis(fileName, cellTypeColumn=None, filtering=False, toExclude=None, toInclude=None):
+    print("Reading h5ad...")
+    annObject = sc.read_h5ad(fileName)
+
+    print("Filtering and making df...")
+    if filtering and cellTypeColumn is not None:
+        if toExclude is not None:
+            annObject = annObject[~annObject.obs[cellTypeColumn].isin(toExclude)]
+        if toInclude is not None:
+            annObject = annObject[annObject.obs[cellTypeColumn].isin(toInclude)]
+
+    df = pd.DataFrame(annObject.X.toarray(), index = annObject.obs.index , columns = annObject.var.index).T
+    return annObject, df, cellTypeColumn
+
+
+# Gets the MC-KO basis made by Michael Herriges in the Kotton Lab with only mouse lung epithelial cells
 def loadMCKOBasis():
     print("Loading...")
     basis = top.load_basis("MC-KO", 50)
@@ -40,18 +60,6 @@ def loadMCKOBasis():
     cleanedBasis = cleanedBasis.rename(columns=newCols)
     return cleanedBasis
 
-# Function to make a basis using Emma Rawlins mouse lung data
-def loadRawlins(file='/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad', cell_type_column = 'new_celltype', filtering=False):
-    # toExclude = ["Alveolar fibro", "Interm fibro", "Adventitial fibro", "SPP1+ MΦ", "Pericyte", "Late tip"]
-    # toExclude = ["Alveolar fibro"]
-    print("Reading h5ad...")
-    rawlins = sc.read_h5ad(file)
-
-    print("Filtering and making df...")
-    if filtering:
-        rawlins = rawlins[~rawlins.obs[cell_type_column].isin(toExclude)]
-    rawlins_df = pd.DataFrame(rawlins.X.toarray(), index = rawlins.obs.index , columns = rawlins.var.index).T
-    return rawlins, rawlins_df, cell_type_column
 
 # Function to make a basis using LungMap human data
 def loadHumanBasis(filtering=True, includeRas=False):
@@ -78,6 +86,7 @@ def loadHumanBasis(filtering=True, includeRas=False):
         humanBasis = humanBasis[[colName for colName in humanBasis.columns if colName in basisKeep]]
     print("Loaded basis!")
     return humanBasis
+
 
 # Function to get the AnnObject and associated objects for a test dataset, with additional handling if there is no h5ad file
 def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnObject=True, buildingUp=False, normalized=False, useAverage=False):
@@ -119,8 +128,10 @@ def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnOb
 
     return annObject, df, metadata, processedData, annotations, kwargs, toKeep
 
+
 # Get the info needed to load the specific test set
 def getDatasetSepcificInfo(dataset):
+
     if dataset == "Kostas":
         filePath = "../Kostas/Kostas.h5ad"
         cell_type_column = "cell_type_epithelial_mesenchymal_final"
@@ -130,29 +141,37 @@ def getDatasetSepcificInfo(dataset):
         cell_type_column = "labeled_clusters"
         toKeep =  ["Basal", "Injured Type II", "Naive Type I", "Naive Type II", "Transdifferentiating Type II", "Cell Cycle Arrest Type II", "Proliferating Type II"]
     elif dataset == "Strunz":
-        filePath = "../Strunz"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Strunz"
         cell_type_column = "cell_type"
         toKeep = ["AT2", "AT2 activated", "Krt8+ ADI", "AT1", "Basal", "Mki67+ Proliferation"]
     elif dataset == "Choi":
-        filePath = "../Choi"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Choi"
         cell_type_column = "celltype_4"
         toKeep =  ["AT1", "AT2", "Primed", "Intermediate", "Cycling AT2"]
     elif dataset == "Kobayashi":
-        filePath = "../Kobayashi"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kobayashi"
         cell_type_column = "cell_type"
         toKeep = ["AEC1", "AEC2", "Ctgf+", "AEC2-proliferating", "Lgals3+"]
     elif dataset == "Kathiriya":
-        filePath = "../Kathiriya/Kathiriya.h5ad"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kathiriya/Kathiriya.h5ad"
         cell_type_column = "celltypes"
         toKeep = [0, 1, 2, 3, 4, 5, 6]
     elif dataset == "Habermann":
-        filePath = "../Habermann/Habermann.h5ad"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Habermann/Habermann.h5ad"
         cell_type_column = "celltype"
         toKeep = ["AT1", "AT2", "KRT5-/KRT17+", "Proliferating Epithelial Cells", "Transitional AT2", "SCGB3A2+", "SCGB3A2+ SCGB1A1+"]
     elif dataset == "Bibek":
-        filePath = "../BibekPneumonectomy/Bibek.h5ad"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Bibek.h5ad"
         cell_type_column = "annotation_update"
         toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
+    elif dataset == "Rawlins":
+        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad'
+        cell_type_column = 'new_celltype'
+        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
+    elif dataset == "Tsukui":
+        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Tsukui.h5ad'
+        cell_type_column = "celltype"
+        toKeep = []
 
     return cell_type_column, toKeep, filePath
 
@@ -226,6 +245,15 @@ def getEmbedding(data):
     return embedding
 
 
+# Set  keyword arguments to re-use for some plots
+def setArguments(source_annotations):
+
+    kwargs = {'s': 40,
+              'style': source_annotations
+             }
+    return kwargs
+
+
 # Using any dataset with well-defined clusters, set it as a basis
 def setBasis(basis_df, basis_metadata, cell_type_column = 'labeled_clusters'):
 
@@ -266,7 +294,7 @@ def combineBases(basis1, df, metadata, colsToKeep, cell_type_column='labeled_clu
     basis1.index.name = basis2.index.name
     return pd.merge(basis1, basis2[colsToKeep], on=basis1.index.name, how="inner")
 
-        
+
 # First step of testing the accuracy of a basis. Trains a basis and outputs holdouts 
 def testBasis1(basis_df, basis_metadata, cell_type_column='labeled_clusters'):
 
@@ -421,32 +449,28 @@ def getMatchingProjections(projections, metadata, cell_type_column, basisKeep, s
 # Create bar plot of the highest projection scores for a particular sample
 def plot_highest(projections, n=10, ax=None, **kwargs):
     ax = ax or plt.gca()
-    
     projections_sorted = projections.sort_values(by=projections.columns[0])
     projections_top10 = projections_sorted.iloc[-n:]
     return projections_top10.plot.barh(ax=ax, **kwargs)
 
+
 # Helper function for creating a color bar
 def create_colorbar(data, label, colormap='rocket_r', ax = None):
     ax = ax or plt.gca()
-    
     cmap = plt.get_cmap(colormap)
     scalarmap = ScalarMappable(norm=plt.Normalize(min(data), max(data)),
                                cmap=cmap)
     scalarmap.set_array([])
     plt.colorbar(scalarmap, label=label, ax = ax)
-    
     return cmap
+
 
 # Create scatter plot showing projections of each cell in a UMAP plot, for a given cell type
 def plot_UMAP(projections, embedding, cell_type, ax=None, **kwargs):
     ax = ax or plt.gca()
-    
     type_projections = np.array(projections.loc[cell_type]).T
-    
     palette = create_colorbar(type_projections, 'Projection onto {}'.format(cell_type),
                              ax = ax)
-    
     plot = sns.scatterplot(x = embedding[:,0],
                            y = embedding[:,1],
                            hue = type_projections,
@@ -456,7 +480,8 @@ def plot_UMAP(projections, embedding, cell_type, ax=None, **kwargs):
                            **kwargs
                           )
     plot.legend_.remove()
-    
+
+
 # Create scatter plot showing top projection types for each cell
 def plot_top(projections, tSNE_data, minimum_cells=50, ax=None, **kwargs):
     ax = ax or plt.gca()
@@ -537,7 +562,7 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
 
     # Set up label colors and shapes
     colors = list(sns.color_palette("bright")) + list(sns.color_palette())
-    markers = ["X", "o", "^", "s", "d", "p", "*", "+", "1", "2", "3", "4", "<", ">", "|", "_", "v", "H", "h", "D", "x", ".", ","]
+    markers = ["X", "o", "^", "s", "d", "p", "*",  "<", ">", "v", "H", "h", "D", "x", ".", ",", "1", "2", "3", "4", "+", "|", "_"]
     labels = [str(label) for label in set(annotations) if label != "Other"]
     labelColorMap = {}
     labelMarkerMap = {}
@@ -818,7 +843,9 @@ def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=N
             widths.append(group_width / groupLength)
 
     # Colors for each boxplot within a group
-    colors = ['skyblue', 'goldenrod', 'lightgreen', 'plum', 'blanchedalmond', 'lavender', 'salmon', 'crimson', 'midnightblue', 'maroon']
+    # colors = ['skyblue', 'goldenrod', 'lightgreen', 'plum', 'blanchedalmond', 'lavender', 'salmon', 'crimson', 'midnightblue', 'maroon']
+    colors = list(sns.color_palette("bright")) + list(sns.color_palette())
+
     medianlineprops = dict(linewidth=1.5, color='black')
 
     # Plot each set of boxplots
@@ -868,25 +895,9 @@ def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=N
         ax.vlines(x=group_border, ymin=y_min, ymax=y_max, 
                   color='black', linestyle='dashed', linewidth=1)
 
-    ax.set_xticklabels(individualLabels, fontsize="large")
+    ax.set_xticklabels(individualLabels, fontsize="large", rotation=45)
     ax.set_xlabel("Source Labels", weight="bold", fontsize="large")
     ax.set_ylabel("Similarity Scores", weight="bold", fontsize="large")
     ax.legend([plt.Rectangle((0,0),1,1,facecolor=c) for c in colors[:num_boxes_per_group]], 
                basisLabels, loc="upper right", title="Basis Labels")
 
-
-def setArguments(source_annotations):
-
-    # Set some keyword arguments we'll re-use for our scatter plots
-    kwargs = {'s': 40,
-              'style': source_annotations
-             }
-    return kwargs
-
-# A custom legend illustrating the source annotations
-# source_legend = [Line2D([0], [0], marker='o', color='w', label='Injured Type II',
-#                               markerfacecolor='k', markersize=10),
-#                       Line2D([0], [0], marker='X', color='w', label='Naive Type 1',
-#                               markerfacecolor='k', markersize=10),
-#                       Line2D([0], [0], marker='s', color='w', label='Naive Type 2',
-#                               markerfacecolor='k', markersize=10)]
