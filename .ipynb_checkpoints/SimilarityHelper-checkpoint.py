@@ -3,7 +3,6 @@
 
 import numpy as np
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import math
 import seaborn as sns
@@ -26,22 +25,6 @@ from scipy.sparse import csr_matrix
 import hdf5plugin
 
 
-# Gets AnnObject and basis df given h5ad file
-def loadBasis(fileName, cellTypeColumn=None, filtering=False, toExclude=None, toInclude=None):
-    print("Reading h5ad...")
-    annObject = sc.read_h5ad(fileName)
-
-    print("Filtering and making df...")
-    if filtering and cellTypeColumn is not None:
-        if toExclude is not None:
-            annObject = annObject[~annObject.obs[cellTypeColumn].isin(toExclude)]
-        if toInclude is not None:
-            annObject = annObject[annObject.obs[cellTypeColumn].isin(toInclude)]
-
-    df = pd.DataFrame(annObject.X.toarray(), index = annObject.obs.index , columns = annObject.var.index).T
-    return annObject, df, cellTypeColumn
-
-
 # Gets the MC-KO basis made by Michael Herriges in the Kotton Lab with only mouse lung epithelial cells
 def loadMCKOBasis():
     print("Loading...")
@@ -61,7 +44,7 @@ def loadMCKOBasis():
     return cleanedBasis
 
 
-# Function to make a basis using LungMap human data
+# Function to make a basis using LungMap human data (to remove once h5ad made for lungMAP)
 def loadHumanBasis(filtering=True, includeRas=False):
     with h5py.File('/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/scripts/humanBasis.h5', "r") as f:
         cellTypes = f["df"]["axis0"][:]
@@ -88,92 +71,83 @@ def loadHumanBasis(filtering=True, includeRas=False):
     return humanBasis
 
 
-# Function to get the AnnObject and associated objects for a test dataset, with additional handling if there is no h5ad file
-def processDataset(datasetName, simplifying=False, keepAll=False, filteringAnnObject=True, buildingUp=False, normalized=False, useAverage=False):
-    cell_type_column, toKeep, filePath = getDatasetSepcificInfo(datasetName)
-
-    print("Processing dataset...")
-    # If there is no h5ad, assemble AnnData objet
-    if buildingUp:
-        if datasetName == "Kobayashi":
-            matrix = pd.read_csv(filePath + '/rawcounts.mtx')
-            annObject = ad.AnnData(matrix)
-        else:
-            annObject = sc.read_mtx(filePath + '/rawcounts.mtx')
-        annObject.var = pd.read_csv(filePath + '/genes.txt', header=None)
-        annObject.obs = pd.read_csv(filePath + '/cellinfo.csv',sep="\t")
-        annObject.var.columns = ["name"]
-        annObject.var.set_index("name", inplace=True)
-        annObject.obs.set_index("cell_barcode", inplace=True)
-        annObject.obs.index.names = ["index"]
-        annObject.var.index.names = ["index"]
+# Converts files in raw format (straight from GEO usually) to AnnData
+def rawToAnnData(countsPath, genesPath, metadataPath, matrix=False, metadataSeparator="\t"):
+    if matrix:
+        annObject = sc.read_mtx(countsPath)
     else:
-        annObject = sc.read_h5ad(filePath)
-
-    if filteringAnnObject and not keepAll:
-        annObject = annObject[annObject.obs[cell_type_column].isin(toKeep)]
-        
-    print("Created Ann Object!")
-        
-    df = pd.DataFrame(annObject.X.toarray(), index = annObject.obs.index , columns = annObject.var.index).T
-    metadata = annObject.obs
-    clusters = metadata[cell_type_column].values
-    if not normalized:
-        processedData = top.process(df, average=useAverage)
-    else:
-        processedData = df
-    print("Created scTOP processed data")
-    annotations = setSourceAnnotations(clusters, toKeep, keepAll=keepAll, simplifying=False)
-    kwargs = setArguments(annotations[annotations!='Other'])
-
-    return annObject, df, metadata, processedData, annotations, kwargs, toKeep
+        annObject = ad.AnnData(pd.read_csv(countsPath))
+    annObject.var = pd.read_csv(genesPath, header=None)
+    annObject.obs = pd.read_csv(metadataPath, sep=metadataSeparator)
+    annObject.var.columns = ["name"]
+    annObject.var.set_index("name", inplace=True)
+    annObject.obs.set_index("cell_barcode", inplace=True)
+    annObject.obs.index.names = ["index"]
+    annObject.var.index.names = ["index"]
+    return annObject
 
 
 # Get the info needed to load the specific test set
-def getDatasetSepcificInfo(dataset):
-
+def getDatasetSpecificInfo(dataset):
+    timeColumn = None
+    timeSplitChar = None
+    toExclude = []
+    duplicates = False
+    raw = False
+    layer = None
+    
     if dataset == "Kostas":
         filePath = "../Kostas/Kostas.h5ad"
-        cell_type_column = "cell_type_epithelial_mesenchymal_final"
+        cellTypeColumn = "cell_type_epithelial_mesenchymal_final"
         toKeep = ["AT1", "AT2", "AT2 activated", "Proliferating", "Transitional epithelial"]
     elif dataset == "Riemondy":
         filePath = "../Riemondy/Riemondy.h5ad"
-        cell_type_column = "labeled_clusters"
+        cellTypeColumn = "labeled_clusters"
         toKeep =  ["Basal", "Injured Type II", "Naive Type I", "Naive Type II", "Transdifferentiating Type II", "Cell Cycle Arrest Type II", "Proliferating Type II"]
     elif dataset == "Strunz":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Strunz"
-        cell_type_column = "cell_type"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/StrunzAnnData.h5ad"
+        cellTypeColumn = "cell_type"
         toKeep = ["AT2", "AT2 activated", "Krt8+ ADI", "AT1", "Basal", "Mki67+ Proliferation"]
+        timeColumn = "time_point"
+        timeSplitChar = " "
     elif dataset == "Choi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Choi"
-        cell_type_column = "celltype_4"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Choi/celltype_1_Epi_v4_merged_AT2.h5ad"
+        cellTypeColumn = "celltype_4"
         toKeep =  ["AT1", "AT2", "Primed", "Intermediate", "Cycling AT2"]
+        duplicates = True
     elif dataset == "Kobayashi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kobayashi"
-        cell_type_column = "cell_type"
+        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/KobayashiAnnData.h5ad"
+        cellTypeColumn = "cell_type"
         toKeep = ["AEC1", "AEC2", "Ctgf+", "AEC2-proliferating", "Lgals3+"]
     elif dataset == "Kathiriya":
         filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kathiriya/Kathiriya.h5ad"
-        cell_type_column = "celltypes"
+        cellTypeColumn = "celltypes"
         toKeep = [0, 1, 2, 3, 4, 5, 6]
     elif dataset == "Habermann":
         filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Habermann/Habermann.h5ad"
-        cell_type_column = "celltype"
+        cellTypeColumn = "celltype"
         toKeep = ["AT1", "AT2", "KRT5-/KRT17+", "Proliferating Epithelial Cells", "Transitional AT2", "SCGB3A2+", "SCGB3A2+ SCGB1A1+"]
     elif dataset == "Bibek":
         filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Bibek.h5ad"
-        cell_type_column = "annotation_update"
+        cellTypeColumn = "annotation_update"
         toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
+        timeColumn = "days"
+        timeSplitChar = "_"
     elif dataset == "Rawlins":
         filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad'
-        cell_type_column = 'new_celltype'
+        cellTypeColumn = 'new_celltype'
         toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
     elif dataset == "Tsukui":
         filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Tsukui.h5ad'
-        cell_type_column = "celltype"
+        cellTypeColumn = "celltype"
         toKeep = []
+    elif dataset == "Burgess":
+        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Burgess/Burgess.h5ad'
+        cellTypeColumn = "new_cluster"
+        # cell_type_column = "seurat_clusters"
+        toKeep = ["CASP4+ cells", "Differentiating iAT2/iAT1", "Early iAT1s", "FGL1 high iAT2s", "iAT2s", "Late iAT1s"]
 
-    return cell_type_column, toKeep, filePath
+    return cellTypeColumn, toKeep, toExclude, filePath, timeColumn, timeSplitChar, duplicates, raw, layer
 
 # Set the labels for the given cluster
 def setSourceAnnotations(clusters, keepList, keepAll=False, simplifying=False):
@@ -216,6 +190,11 @@ def writeAnnDataObject(annDataObj, outFile):
 # Get average projections given time series data
 def getTimeAveragedProjections(basis, df, cellLabels, times, timeSortFunc, substituteMap=None):
 
+    # basis = obj.basis
+    # df = obj.df
+    # cellLabels = obj.annotation
+    # times = obj.metadata[obj.timeColumn]
+    # timeSortFunc = obj.timeSortFunction
     projections = {}
     processedData = {}
     timesSorted = sorted([str(time) for time in set(times)], key=timeSortFunc)
@@ -254,154 +233,12 @@ def setArguments(source_annotations):
     return kwargs
 
 
-# Using any dataset with well-defined clusters, set it as a basis
-def setBasis(basis_df, basis_metadata, cell_type_column = 'labeled_clusters'):
-
-    # Count the number of cells per type
-    type_counts = basis_metadata[cell_type_column].value_counts()
-
-    # Using fewer than 150-200 cells leads to nonsensical results, due to noise. More cells -> less sampling error
-    threshold = 200 # only use cell types with at least this many cells (but use all cells for training)
-    types_above_threshold = type_counts[type_counts > threshold].index
-    basis_list = []
-    training_IDs = []
-
-    rng = np.random.default_rng()
-
-    for cell_type in tqdm(types_above_threshold):
-        cell_IDs = basis_metadata[basis_metadata[cell_type_column] == cell_type].index
-        current_IDs = rng.choice(cell_IDs, size=threshold, replace=False) # This line is for using only the threshold number of cells for the reference basis. This can be useful for testing the accuracy of the basis, but it performs notably worse in accuracy metrics compared to using all possible cells.
-        # current_IDs = cell_IDs
-
-        cell_data = basis_df[current_IDs]
-        training_IDs += [current_IDs] # Keep track of training_IDs so that you can exclude them if you want to test the accuracy
-
-        # Average across the cells and process them using the scTOP processing method
-        processed = top.process(cell_data, average=True)
-        basis_list += [processed]
-
-    training_IDs = np.concatenate(training_IDs)
-    basis = pd.concat(basis_list, axis=1)
-    basis.columns = types_above_threshold
-    basis.index.name = "gene"
-    print("Basis set!")
-    return basis
-
-
-# Add the desired columns of a smaller basis to a primary basis
-def combineBases(basis1, df, metadata, colsToKeep, cell_type_column='labeled_clusters'):
-    basis2 = setBasis(df, metadata, cell_type_column=cell_type_column)
-    basis1.index.name = basis2.index.name
-    return pd.merge(basis1, basis2[colsToKeep], on=basis1.index.name, how="inner")
-
-
-# First step of testing the accuracy of a basis. Trains a basis and outputs holdouts 
-def testBasis1(basis_df, basis_metadata, cell_type_column='labeled_clusters'):
-
-    # Count the number of cells per type
-    type_counts = basis_metadata[cell_type_column].value_counts()
-
-    # Using fewer than 150-200 cells leads to nonsensical results, due to noise. More cells -> less sampling error
-    threshold = 200 # only use cell types with at least this many cells (but use all cells for training)
-    types_above_threshold = type_counts[type_counts > threshold].index
-    types_above_threshold
-    basis_list = []
-    training_IDs = []
-
-    rng = np.random.default_rng()
-    print("Processing cell types...")
-
-    for cell_type in tqdm(types_above_threshold):
-        cell_IDs = basis_metadata[basis_metadata[cell_type_column] == cell_type].index
-        current_IDs = rng.choice(cell_IDs, size=threshold, replace=False) # This line is for using only the threshold number of cells for the reference basis. This can be useful for testing the accuracy of the basis, but it performs notably worse in accuracy metrics compared to using all possible cells.
-        # current_IDs = cell_IDs
-
-        cell_data = basis_df[current_IDs]
-        training_IDs += [current_IDs] # Keep track of training_IDs so that you can exclude them if you want to test the accuracy
-
-        # Average across the cells and process them using the scTOP processing method
-        processed = top.process(cell_data, average=True)
-        basis_list += [processed]
-
-    training_IDs = np.concatenate(training_IDs)
-    trainBasis = pd.concat(basis_list, axis=1)
-    trainBasis.columns = types_above_threshold
-
-    test_IDs = np.setdiff1d(basis_df.columns, training_IDs)
-    # test_IDs = training_IDs
-    split_IDs = np.array_split(test_IDs, 10) # I split this test dataset because it's very large and took up a lot of memory -- you don't need to do this if you have enough memory to test the entire dataset at once
-    return trainBasis, test_IDs, split_IDs
-
-
-# Second step of testing a basis, using the outputs of the first step. Optionally adjust the minimum accuracy threshold
-def testBasis2(trainBasis, basis_df, test_IDs, split_IDs, basis_metadata, cell_type_column, specification_value=0.1):
-    print("Processing test data...")
-    accuracies = {'top1': 0,
-                  'top3': 0,
-                  'unspecified': 0
-    }
-    matches = {}
-    misses = {}
-    for sample_IDs in tqdm(split_IDs):
-        test_data = basis_df[sample_IDs]
-        test_processed = top.process(test_data)
-        test_projections = top.score(trainBasis, test_processed)
-        accuracies, matches, misses = scoreProjections(accuracies, matches, misses, test_projections, basis_metadata, cell_type_column, specification_value=specification_value)
-        del test_data
-        del test_processed
-        del test_projections
-    for key, value in accuracies.items():
-        print("{}: {}".format(key, value/len(test_IDs)))
-
-    return accuracies, matches, misses
-
-
-# Get the metrics for a given projection. Optionally adjust the minimum accuracy threshold
-def scoreProjections(accuracies, matches, misses, projections, metadata, cell_type_column, specification_value=0.1):
-    # cells with maximum projection under this value are considered "unspecified"
-
-    predicted_labels = []
-    predicted_labels_specified = []
-    true_labels = []
-    matches = {}
-    misses = {}
-    print("Scoring projection...")
-    for sample_id, sample_projections in projections.items():
-        types_sorted_by_projections = sample_projections.sort_values(ascending=False).index
-        true_type = metadata.loc[sample_id, cell_type_column]
-        true_labels += [true_type]
-        top_type = types_sorted_by_projections[0]
-        predicted_labels += [top_type]
-
-        if sample_projections.max() < specification_value:
-            predicted_labels_specified += ['Unspecified']
-            accuracies['unspecified'] += 1
-        else:
-            predicted_labels_specified += [top_type]
-
-        if top_type == true_type:
-            accuracies['top1'] += 1
-            if true_type not in matches:
-                matches[true_type] = 1
-            else:
-                matches[true_type] += 1
-        else:
-            if true_type not in misses:
-                misses[true_type] = 1
-            else:
-                misses[true_type] += 1
-        if true_type in types_sorted_by_projections[:3]:
-            accuracies['top3'] += 1
-
-    return accuracies, matches, misses
-
-
 # Get dict of cell types in the source to the counts of cell types in the basis they were most similar to
-def getTopPredictedMap(projections, metadata, cell_type_column="cell_type"):
+def getTopPredictedMap(topObject, projections):
     topPredictedMap = {}
     for sample_id, sample_projections in projections.items():
         types_sorted_by_projections = sample_projections.sort_values(ascending=False).index
-        true_type = metadata.loc[sample_id, cell_type_column]
+        true_type = topObject.metadata.loc[sample_id, topObject.cellTypeColumn]
         top_type = types_sorted_by_projections[0]
         # print(sample_id + ", " + true_type)
         if true_type not in topPredictedMap:
@@ -510,48 +347,114 @@ def plot_top(projections, tSNE_data, minimum_cells=50, ax=None, **kwargs):
 # Create scatter plot showing projection scores for two cell types, with the option to
 # color according to marker gene
 def plot_two(projections, celltype1, celltype2,
-             gene=None, gene_expressions=None, ax=None, 
-             title=None, hue=None, labels=None, palette=None, markers=None, 
-             minSimilarity=-0.1, maxSimilarity=0.4, legendFontSize=16, **kwargs):
+             gene=None, plotMultiple=False,
+             geneExpressions=None, ax=None,
+             annotations=None, includeCriteria=None,
+             hue=None, labels=None, palette=None, markers=None, markerSize=40, 
+             similarityBounds=None, axisFontSize=10, legendFontSize=10):#, **kwargs):
 
+    # Filter annotations and/or projections if chosen
+    if includeCriteria is not None:
+        if annotations is not None:
+            annotations = np.array(annotations)[includeCriteria]
+        if projections is not None:
+            projections = projections.loc[:, includeCriteria]
+
+    # Set axes for current plot
     ax = ax or plt.gca()
     x = projections.loc[celltype1]
     y = projections.loc[celltype2]
-    
-    if gene:
-        palette = create_colorbar(gene_expressions.loc[gene],
-                                  '{} expression'.format(gene), ax=ax)
 
-        plot = sns.scatterplot(x=x,
-                               y=y,
-                               hue=gene_expressions.loc[gene],
-                               palette=palette,
-                               alpha=0.5,
-                               ax=ax,
-                               **kwargs
-                               )
-        plot.legend_.remove()
+    # If labeling by gene expression instead of source labels
+    if gene:
+        ax = geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, markerSize=markerSize, alpha=0.5)
+        # if hue is None:
+        #     print("Hue not inputted!")
+        #     return None
+        # palette = create_colorbar(gene_expressions.loc[gene],
+        #                           '{} expression'.format(gene), ax=ax)
+
+        # plot = sns.scatterplot(x=x,
+        #                        y=y,
+        #                        hue=gene_expressions.loc[gene],
+        #                        palette=palette,
+        #                        alpha=0.5,
+        #                        ax=ax,
+        #                        **kwargs
+        #                        )
+        # plot.legend_.remove()
+
+    elif plotMultiple:
+        if palette is None or markers is None or labels is None:
+            print("Palette or markers or labels not inputted!")
+            return None
+        ax = sourceLabelPlotMultiple(ax, x, y, annotations, labels, palette, markers, markerSize=markerSize, axisFontSize=axisFontSize, legendFontSize=legendFontSize)
 
     else:
+        ax = sourceLabelPlotSingle(ax, x, y, annotations, labels, legendFontSize=legendFontSize, markerSize=markerSize, alpha=0.5)
 
-        if palette is None or markers is None:
-            plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
-        else:
-            plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-        ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
-        
-    if title is not None:
-        ax.set_title(title)
+        # if palette is None or markers is None or labels is None:
+        #     # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
+        #     plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, s=40) #**kwargs)
+        #     plt.legend(bbox_to_anchor=(1,1))
+        # else:
+        #     # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
+        #     plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
+        # ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
+
     ax.axvline(x=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
     ax.axhline(y=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
-    ax.set_xlim(minSimilarity, maxSimilarity)
-    ax.set_ylim(minSimilarity, maxSimilarity)
 
-    return sns.color_palette()
+    if similarityBounds is not None and len(similarityBounds) == 2:
+        ax.set_xlim(similarityBounds[0], similarityBounds[1])
+        ax.set_ylim(similarityBounds[0], similarityBounds[1])
+
+    # return sns.color_palette()
+    return ax
 
 
-# Plot multiple 2D similarity plots at once based on some field, such as time
-def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCategory, subsetNames, legendFontSize=16, minSimilarity=-0.1, maxSimilarity=0.4, 
+# Craetes a Seaborn 2D scatter plot using projections onto basis columns as axes and gene expressions to identify points. Helper for plot_two
+def geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, palette, markerSize=40, alpha=0.5):
+    if annotations is None or geneExpressions is None:
+        print("Hue or gene expressions not inputted!")
+        return None
+    palette = create_colorbar(geneExpressions.loc[gene],
+                              '{} expression'.format(gene), ax=ax)
+
+    plot = sns.scatterplot(x=x,
+                           y=y,
+                           hue=geneExpressions.loc[gene],
+                           palette=palette,
+                           alpha=alpha,
+                           ax=ax,
+                           s=markerSize, # Marker size
+                           style=annotations
+                           )
+    plot.legend_.remove()
+    return ax
+
+
+# Craetes a Seaborn 2D scatterplot using projections onto basis columns as axes and source labels to identify points
+def sourceLabelPlotSingle(ax, x, y, annotations, labels, legendFontSize=10, markerSize=40, alpha=0.5):
+    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
+    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, s=markerSize) #**kwargs)
+    # plt.legend(bbox_to_anchor=(1,1))
+    ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
+    return ax
+
+
+# Craetes a Seaborn 2D scatterplot using projections onto basis columns as axes and source labels to identify points
+def sourceLabelPlotMultiple(ax, x, y, annotations, labels, palette, markers, markerSize=40, axisFontSize=16, legendFontSize=16, alpha=0.5):
+    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
+    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
+    ax.legend(title="Source Labels", title_fontsize=axisFontSize, fontsize=legendFontSize, loc="upper right")
+    return ax
+
+
+# Plot multiple 2D similarity plots at once based on some field, such as time (Note: figure out difference if any between labels and annotations[toInclude])
+def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCategory, subsetNames, 
+                      similarityBounds=None,
+                      axisFontSize=16, legendFontSize=16, 
                       gene=None, sourceData=None):
 
     # Get subplots
@@ -572,7 +475,7 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
 
     # Plot for each subset
     for i, ax in enumerate(axes.flat):
-        if i >= subsetCount: 
+        if i >= subsetCount:
             fig.delaxes(ax)
             continue
         subset = subsetNames[i]
@@ -582,20 +485,23 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
             geneExpressions = sourceData.loc[:, toInclude]
         else:
             geneExpressions = None
-        plot_two(
+        ax = plot_two(
                 projections.loc[:, toInclude],
                 celltype1, celltype2,
                 ax=ax,
                 hue=annotations[toInclude],
-                title=subset,
                 labels=labels,
                 palette=labelColorMap, markers=labelMarkerMap,
-                legendFontSize = legendFontSize,
-                minSimilarity = minSimilarity, maxSimilarity = maxSimilarity,
-                s=60, 
-                style=annotations[toInclude],
-                gene=gene, gene_expressions=geneExpressions
+                similarityBounds=similarityBounds,
+                axisFontSize=axisFontSize, legendFontSize = legendFontSize,
+                s=60, style=annotations[toInclude],
+                gene=gene, plotMultiple=True,
+                gene_expressions=geneExpressions
         )
+        ax.set_xlabel(celltype1, fontsize=16)
+        ax.set_ylabel(celltype2, fontsize=16)
+        ax.set_title(subset, fontsize=16)
+
 
     return fig, axes
 

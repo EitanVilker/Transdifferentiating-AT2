@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import math
 from scipy import signal
+import scipy.cluster.hierarchy as spc
+import scanpy as sc
 
 
 def filterDFByTime(df, timeName, timeValues):
@@ -228,4 +230,88 @@ def getGeneEntropy(df, gene, timeName=None, timeValues=None):
     return -1 * totalEntropy
 
 
+def getDifferentiallyExpressedGenes(annObject, differentialColumn, case):
+    annObjectCopy = annObject
+    sc.pp.normalize_total(annObjectCopy, inplace=True)
+    sc.pp.log1p(annObjectCopy, copy=False)
+    sc.tl.rank_genes_groups(annObjectCopy, differentialColumn, method='t-test', use_raw=False, copy=False)
+    diffTable = sc.get.rank_genes_groups_df(annObjectCopy, group=case)
+    reducedDiff = diffTable.loc[np.logical_and(diffTable['pvals_adj'] < 0.05, abs(diffTable['logfoldchanges']) > 2), :]
+    print("Complete")
+    return reducedDiff['names']
+
+
+def clusterGenesByCorrelation(df):
+    # Get correlation "distances"
+    corr = df.T.corr().values
+    pdist_uncondensed = 1.0 - abs(corr)
+    pdist_condensed = np.concatenate([row[i+1:] for i, row in enumerate(pdist_uncondensed)])
+
+    # Cluster based on these distances
+    linkage = spc.linkage(pdist_condensed, method='complete')
+    idx = spc.fcluster(linkage, 0.5 * pdist_condensed.max(), 'distance')
+
+    # Create map of clusters to their genes
+    clusterDict = {}
+    for i in range(len(idx)):
+        cluster = int(idx[i])
+        gene = df.index.iloc[i]
+        if cluster not in clusterDict.keys():
+            clusterDict[cluster] = [gene]
+        else:
+            clusterDict[cluster].append(gene)
+    return clusterDict
+
+
+def getDominantGroups(df, clustersList, timeValues, timesSorted, differentialColumn, case, control):
+
+    print("Normalizing...")
+    normalizedDF = df.copy()
+    for gene in df.index:
+        geneControl = df.loc[df.index == gene, differentialColumn == control]
+        geneCase = df.loc[df.index == gene, differentialColumn == case]
+        meanControl = statistics.mean(geneControl)
+        sdControl = np.std(geneControl)
+        normalizedDF.loc[normalizedDF.index == gene, :] = (geneCase - meanControl) / sdControl
+
+    print("Finding DNBs...")
+    clusterValues = {}
+    for time in timesSorted:
+        timeDF = filterDFByTime(normalizedDF, time, timeValues)
+        clusterValues[time] = {}
+        for clusterList in clustersList:
+            # Ideally screen for requirements first or also
+            if len(clusterList) > 2:
+                for cluster in clusterList:
+                    genes = clusterList[cluster]
+                    clusterValues[time][genes] = getSummaryValue(timeDF, time, timeValues, genes, summaryType="CI")
+
+    return clusterValues
+
+
+def findDNB(annObject, timeColumnName, timesSorted, differentialColumn, case, control):
+    annObjectCopy = annObject.copy()
+    metadata = annObjectCopy.obs
+    annObjectCopy = annObjectCopy[np.logical_or(metadata[differentialColumn] == case, metadata[differentialColumn] == control)]
+    metadata = annObjectCopy.obs
+    df = annObjectCopy.to_df().T
+
+    print("Clustering...")
+    clustersList = []
+    for time in timesSorted:
+        print(time)
+        timeDF = df.loc[:, metadata[timeColumnName] == time]
+        timeAnnObject = annObjectCopy.copy()
+        timeAnnObject = timeAnnObject[timeDF.columns, :]
+        timeDF = timeAnnObject.to_df().T
+        highVarianceGenes = timeDF.loc[timeDF.var(axis=1) > 0.01, :].index
+        timeAnnObject = timeAnnObject[:, list(highVarianceGenes)] # Filter by variance
+        timeDF = timeAnnObject.to_df().T
+        genesOfInterest = getDifferentiallyExpressedGenes(timeAnnObject, differentialColumn, case)
+        clustersList.append(clusterGenesByCorrelation(timeDF.loc[timeDF.index.isin(genesOfInterest), :]))
+
+    print("Finding DNB...")
+    rankedGroups = getDominantGroups(df, clustersList, metadata[timeColumnName], timesSorted, differentialColumn, case, control)
+    print("Done!")
+    return rankedGroups
 
