@@ -87,92 +87,6 @@ def rawToAnnData(countsPath, genesPath, metadataPath, matrix=False, metadataSepa
     return annObject
 
 
-# Get the info needed to load the specific test set
-def getDatasetSpecificInfo(dataset):
-    timeColumn = None
-    timeSplitChar = None
-    toExclude = []
-    duplicates = False
-    raw = False
-    layer = None
-    
-    if dataset == "Kostas":
-        filePath = "../Kostas/Kostas.h5ad"
-        cellTypeColumn = "cell_type_epithelial_mesenchymal_final"
-        toKeep = ["AT1", "AT2", "AT2 activated", "Proliferating", "Transitional epithelial"]
-    elif dataset == "Riemondy":
-        filePath = "../Riemondy/Riemondy.h5ad"
-        cellTypeColumn = "labeled_clusters"
-        toKeep =  ["Basal", "Injured Type II", "Naive Type I", "Naive Type II", "Transdifferentiating Type II", "Cell Cycle Arrest Type II", "Proliferating Type II"]
-    elif dataset == "Strunz":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/StrunzAnnData.h5ad"
-        cellTypeColumn = "cell_type"
-        toKeep = ["AT2", "AT2 activated", "Krt8+ ADI", "AT1", "Basal", "Mki67+ Proliferation"]
-        timeColumn = "time_point"
-        timeSplitChar = " "
-    elif dataset == "Choi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Choi/celltype_1_Epi_v4_merged_AT2.h5ad"
-        cellTypeColumn = "celltype_4"
-        toKeep =  ["AT1", "AT2", "Primed", "Intermediate", "Cycling AT2"]
-        duplicates = True
-    elif dataset == "Kobayashi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/KobayashiAnnData.h5ad"
-        cellTypeColumn = "cell_type"
-        toKeep = ["AEC1", "AEC2", "Ctgf+", "AEC2-proliferating", "Lgals3+"]
-    elif dataset == "Kathiriya":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kathiriya/Kathiriya.h5ad"
-        cellTypeColumn = "celltypes"
-        toKeep = [0, 1, 2, 3, 4, 5, 6]
-    elif dataset == "Habermann":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Habermann/Habermann.h5ad"
-        cellTypeColumn = "celltype"
-        toKeep = ["AT1", "AT2", "KRT5-/KRT17+", "Proliferating Epithelial Cells", "Transitional AT2", "SCGB3A2+", "SCGB3A2+ SCGB1A1+"]
-    elif dataset == "Bibek":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Bibek.h5ad"
-        cellTypeColumn = "annotation_update"
-        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
-        timeColumn = "days"
-        timeSplitChar = "_"
-    elif dataset == "Rawlins":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad'
-        cellTypeColumn = 'new_celltype'
-        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
-    elif dataset == "Tsukui":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Tsukui.h5ad'
-        cellTypeColumn = "celltype"
-        toKeep = []
-    elif dataset == "Burgess":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Burgess/Burgess.h5ad'
-        cellTypeColumn = "new_cluster"
-        # cell_type_column = "seurat_clusters"
-        toKeep = ["CASP4+ cells", "Differentiating iAT2/iAT1", "Early iAT1s", "FGL1 high iAT2s", "iAT2s", "Late iAT1s"]
-
-    return cellTypeColumn, toKeep, toExclude, filePath, timeColumn, timeSplitChar, duplicates, raw, layer
-
-# Set the labels for the given cluster
-def setSourceAnnotations(clusters, keepList, keepAll=False, simplifying=False):
-    sourceAnnotations = []
-    for val in clusters:
-        if val in keepList or keepAll:
-            if simplifying:
-                if val == "Naive Type I":
-                    sourceAnnotations.append("AT1")
-                elif val == "Injured Type II":
-                    sourceAnnotations.append("AT2 activated")
-                elif val == "Proliferating Type II":
-                    sourceAnnotations.append("Proliferating")
-                elif val == "Naive Type II":
-                    sourceAnnotations.append("AT2")
-                else:
-                    sourceAnnotations.append(val)
-            else:
-                sourceAnnotations.append(val)
-        else:
-            sourceAnnotations.append("Other")
-
-    return np.array(sourceAnnotations)
-
-
 # Write an AnnData object to an h5ad file
 def writeAnnDataObject(annDataObj, outFile):
     obj = annDataObj
@@ -210,7 +124,7 @@ def getTimeAveragedProjections(basis, df, cellLabels, times, timeSortFunc, subst
             else:
                 projectionKey = current_type + "_" + time
             projections[projectionKey] = current_scores
-    
+
     return projections
 
 
@@ -224,16 +138,8 @@ def getEmbedding(data):
     return embedding
 
 
-# Set  keyword arguments to re-use for some plots
-def setArguments(source_annotations):
-
-    kwargs = {'s': 40,
-              'style': source_annotations
-             }
-    return kwargs
-
-
 # Get dict of cell types in the source to the counts of cell types in the basis they were most similar to
+# Format: Key (source label) -> List (top basis labels of samples with that source label)
 def getTopPredictedMap(topObject, projections):
     topPredictedMap = {}
     for sample_id, sample_projections in projections.items():
@@ -247,13 +153,30 @@ def getTopPredictedMap(topObject, projections):
     return topPredictedMap
 
 
-# Get a dict of cell types in basis to the similarity scores of each type in the source
-def getMatchingProjections(projections, metadata, cell_type_column, basisKeep, sourceKeep, prefix=None):
+# Get a dict of cell types in basis to the similarity scores of each type in the source. 
+# Format: Key (basis label) -> Key (source label) -> Value (projection score list for cells with source label onto the basis label)
+def getMatchingProjections(topObject, projections=None, basisKeep=None, sourceKeep=None, prefix=None):
 
+    # If no projections provided and one exists in the scTOP object, use that
+    if projections is None:
+        if len(topObject.projections.keys()) == 1:
+            projections = list(topObject.projections.values())[0]
+        else:
+            print("Specify projections!")
+            return None
+
+    # If no specific columns provided, use all columns
+    if basisKeep is None:
+        basisKeep = sorted(projections.index)
+    if sourceKeep is None:
+        sourceKeep = sorted(set(topObject.annotations))
+
+    # Initialize map of basis labels
     similarityMap = {}
     for label in basisKeep:
         similarityMap[label] = {}
 
+    # Broaden map to go from basis labels to source labels (with option to include prefix usually to indicate name of source)
     for trueLabel in sourceKeep:
         for label in similarityMap:
             if prefix is not None:
@@ -262,8 +185,9 @@ def getMatchingProjections(projections, metadata, cell_type_column, basisKeep, s
                 adjustedTrueLabel = trueLabel
             similarityMap[label][adjustedTrueLabel] = []
 
+    # For every sample, add its projection scores for each label in the basis, but only for the label assigned in the source
     for sample_id, sample_projections in projections.items():
-        trueLabel = metadata.loc[sample_id, cell_type_column]
+        trueLabel = topObject.metadata.loc[sample_id, topObject.cellTypeColumn]
 
         if trueLabel in sourceKeep:
             projectionTypes = sample_projections.index
@@ -732,40 +656,44 @@ def getLabelColorMap(annotations, includeOther=True):
 
 
 # Create a boxplot of the similarities between any number of sources and a basis
-def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=None, labelIdxStartMap=None):
-    num_groups = len(trueLabels)  # Number of groups
-    num_boxes_per_group = len(basisLabels)  # Number of boxplots per group
+def similarityBoxplot(ax, similarityMap, sourceKeep=None, basisKeep=None, groupLengths=None, labelIdxStartMap=None):
+    # If no specific columns provided, use all columns of similarity map
+    if basisKeep is None:
+        basisKeep = sorted(similarityMap.keys())
+    if sourceKeep is None:
+        sourceKeep = sorted(set(list(similarityMap.values())[0]))
+
+    numGroups = len(sourceKeep)  # Number of groups
+    boxesPerGroup = len(basisKeep)  # Number of boxplots per group
 
     # Define positions for each group
     widths = []
-    group_width = 0.8  # Controls how wide the groups are
-    if True:#groupLengths is None:
-        box_width = group_width / num_boxes_per_group  # Width of each boxplot
-        for i in range(len(trueLabels)):
-            widths.append(box_width)
+    groupWidth = 0.8  # Controls how wide the groups are
+    if groupLengths is None:
+        boxWidth = groupWidth / boxesPerGroup  # Width of each boxplot
+        for i in range(len(sourceKeep)):
+            widths.append(boxWidth)
     else:
         for groupLength in groupLengths:
-            widths.append(group_width / groupLength)
+            widths.append(groupWidth / groupLength)
 
     # Colors for each boxplot within a group
-    # colors = ['skyblue', 'goldenrod', 'lightgreen', 'plum', 'blanchedalmond', 'lavender', 'salmon', 'crimson', 'midnightblue', 'maroon']
     colors = list(sns.color_palette("bright")) + list(sns.color_palette())
-
-    medianlineprops = dict(linewidth=1.5, color='black')
+    medianlineprops = dict(linewidth=1.5, color='black')  # If you don't want a median line comment this out
 
     # Plot each set of boxplots
-    for i in range(num_groups):
-        trueLabel = trueLabels[i]
+    for i in range(numGroups):
+        trueLabel = sourceKeep[i]
         # trueLabelCount = len(similarityMap[label].keys())
-        for j in range(num_boxes_per_group):
-            label = basisLabels[j]
+        for j in range(boxesPerGroup):
+            label = basisKeep[j]
             # print(trueLabel)
             # print(label)
             # # # # print(list(similarityMap[label].keys()))
             # print(colors[j] + "\n")
             if trueLabel in similarityMap[label]:
                 currentBoxWidth = widths[i]
-                pos = i + j * currentBoxWidth - (group_width / 2) + currentBoxWidth / 2  # Offset positions
+                pos = i + j * currentBoxWidth - (groupWidth / 2) + currentBoxWidth / 2  # Offset positions
                 bp = ax.boxplot(similarityMap[label][trueLabel], positions=[pos], widths=currentBoxWidth, patch_artist=True, medianprops=medianlineprops, boxprops={'edgecolor': 'black'}) #, showmeans=True, meanline=True)
                 for box in bp['boxes']:
                     box.set(facecolor=colors[j])
@@ -773,14 +701,14 @@ def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=N
                 print("True label not found")
 
     # Labels
-    ax.set_xticks(range(num_groups))
+    ax.set_xticks(range(numGroups))
     if labelIdxStartMap is not None:
         individualLabels = []
         indices = list(labelIdxStartMap.keys())
         nextIndex = indices[1]
         currentSource = labelIdxStartMap[0]
         sourcesUsed = 1
-        for i in range(num_groups):
+        for i in range(numGroups):
             if i >= nextIndex:
                 sourcesUsed += 1
                 currentSource = labelIdxStartMap[nextIndex]
@@ -788,21 +716,31 @@ def similarityBoxplot(ax, trueLabels, basisLabels, similarityMap, groupLengths=N
                     nextIndex = indices[sourcesUsed]
                 else:
                     nextIndex = 999999999
-            individualLabels.append(currentSource + "\n" + trueLabels[i])
+            individualLabels.append(currentSource + "\n" + sourceKeep[i])
 
     else:
-        individualLabels = trueLabels
+        individualLabels = sourceKeep
 
     # Add vertical lines to separate groups
     y_min, y_max = ax.get_ylim()
-    for i in range(1, num_groups):  # Skip first category
+    for i in range(1, numGroups):  # Skip first category
         group_border = i - 0.5  # Position of separator between groups
-        ax.vlines(x=group_border, ymin=y_min, ymax=y_max, 
+        ax.vlines(x=group_border, ymin=y_min, ymax=y_max,
                   color='black', linestyle='dashed', linewidth=1)
 
     ax.set_xticklabels(individualLabels, fontsize="large", rotation=45)
     ax.set_xlabel("Source Labels", weight="bold", fontsize="large")
     ax.set_ylabel("Similarity Scores", weight="bold", fontsize="large")
-    ax.legend([plt.Rectangle((0,0),1,1,facecolor=c) for c in colors[:num_boxes_per_group]], 
-               basisLabels, loc="upper right", title="Basis Labels")
+    ax.legend([plt.Rectangle((0,0),1,1,facecolor=c) for c in colors[:boxesPerGroup]], 
+               basisKeep, loc="upper right", title="Basis Labels")
 
+
+# Display correlation matrix
+def plotCorrelationMatrix(corr, title="Basis Column Correlations"):
+    plt.imshow(corr, cmap='plasma')
+    plt.colorbar()
+    ticks = range(len(corr.index))
+    plt.xticks(ticks, corr.index, rotation=90)
+    plt.yticks(ticks, corr.index)
+    plt.title(title)
+    plt.show()

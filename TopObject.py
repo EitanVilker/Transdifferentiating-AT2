@@ -7,7 +7,7 @@ import sctop as top
 import scanpy as sc
 import anndata as ad
 from tqdm import tqdm
-
+import inspect
 
 class TopObject:
     def __init__(self, name, manualInit=False, useAverage=False, datasetInfo=None):
@@ -18,8 +18,37 @@ class TopObject:
         else:
             # Prompt to manually add dataset info
             pass
+        self.projections = {}
+        self.basis = None
         if not manualInit:  # In case you want to adjust any of the parameters first
             self.setAnnObject()
+
+    # Summary of parameters upon printing object
+    def __str__(self):
+        attributeMap = inspect.getmembers(self)[2][1]
+        keys = attributeMap.keys()
+        toReturn = "Attributes:"
+        for key in keys:
+            value = attributeMap[key]
+            valueType = type(value)
+            if valueType is str or valueType is bool:
+                toReturn += "\n" + key + ": " + str(value)
+            elif valueType is list or valueType is np.ndarray:
+                if len(value) > 0 and type(value[0]) is np.ndarray:
+                    value = value[0]
+                if len(value) > 5:
+                    toReturn += "\n" + key + ": [" + ", ".join(list(value[:5])) + "]..."
+                else:
+                    toReturn += "\n" + key + ": " + str(value)
+            elif valueType is pd.core.frame.DataFrame:
+                toReturn += "\n" + key + ": " + str(list(value.columns)[:5]) + "..."
+            elif valueType is pd.core.series.Series:
+                toReturn += "\n" + key + ": " + str(list(value)[:5]) + "..."
+            elif value is None:
+                toReturn += "\n" + key + ": None"
+            else:
+                toReturn += "\n" + key + ": " + str(valueType)
+        return toReturn
 
     # Initialize AnnData object
     def setAnnObject(self, useAverage=False):
@@ -82,8 +111,6 @@ class TopObject:
     def projectOntoBasis(self, basis, projectionName):
         print("Projecting onto basis...")
         projection = top.score(basis, self.processedData)
-        if not hasattr(self, "projections"):
-            self.projections = {}
         self.projections[projectionName] = projection
         print("Finished projecting!")
         return projection
@@ -121,15 +148,14 @@ class TopObject:
         # test_IDs = training_IDs
         self.split_IDs = np.array_split(test_IDs, 10) # From Maria- "I split this test dataset because it's very large and took up a lot of memory -- you don't need to do this if you have enough memory to test the entire dataset at once"
         print("Basis set!")
+        return self.basis
 
     # Add the desired columns of a smaller basis to a primary basis
     def combineBases(self, otherBasis, colsToKeep, useAllCells=True, combinedBasisName="Combined"):
         print("Combining bases...")
-        if not hasattr(self, "basis"):
-            self.setBasis(useAllCells=useAllCells)
+        self.setBasis(useAllCells=useAllCells)
         if otherBasis.isinstance(TopObject):
-            if not hasattr(otherBasis, "basis"):
-                otherBasis.setBasis(useAllCells=useAllCells)
+            otherBasis.setBasis(useAllCells=useAllCells)
             basis2 = otherBasis.basis
         else:
             basis2 = otherBasis
@@ -160,6 +186,7 @@ class TopObject:
             print("{}: {}".format(key, value / (10 * len(split_IDs))))
 
         self.testResults = (accuracies, matches, misses)
+        return self.testResults
 
     # Get the metrics for a given projection. Optionally adjust the minimum accuracy threshold
     def scoreProjections(self, accuracies, matches, misses, projections, specification_value=0.1): # cells with maximum projection under specification_value are considered "unspecified"
@@ -198,6 +225,14 @@ class TopObject:
                 accuracies['top3'] += 1
 
         return accuracies, matches, misses
+
+    # Create correlation matrix between cell types of basis, helpful to determine if any features are overlapping
+    def getBasisCorrelations(self):
+        if self.basis is None:
+            print("Basis must be set first!")
+            return None
+        self.corr = self.basis.corr()
+        return self.corr
 
 
 # Get the info needed to load the specific dataset
