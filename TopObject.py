@@ -8,20 +8,26 @@ import scanpy as sc
 import anndata as ad
 from tqdm import tqdm
 import inspect
+from copy import deepcopy
 
 class TopObject:
-    def __init__(self, name, manualInit=False, useAverage=False, datasetInfo=None):
+    def __init__(self, name, manualInit=False, useAverage=False, skipProcess=False, dataset="/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/DatasetInformation.csv"):
         self.name = name
-        datasetInfo = getDatasetSpecificInfo(self.name)
+        datasetInfo = pd.read_csv(dataset, index_col="Name", keep_default_na=False).loc[name, :]
         if len(datasetInfo) > 1:
             self.cellTypeColumn, self.toKeep, self.toExclude, self.filePath, self.timeColumn, self.duplicates, self.raw, self.layer = datasetInfo
         else:
             # Prompt to manually add dataset info
             pass
+        if type(self.toKeep) is str and len(self.toKeep) > 0:
+            self.toKeep = self.toKeep[1:-1].replace("'", "").split(", ")
+        if type(self.toExclude) is str and len(self.toExclude) > 0:
+            self.toExclude = self.toExclude[1:-1].replace("'", "").split(", ")
+
         self.projections = {}
         self.basis = None
         if not manualInit:  # In case you want to adjust any of the parameters first
-            self.setAnnObject()
+            self.setup(useAverage=useAverage, skipProcess=skipProcess)
 
     # Summary of parameters upon printing object
     def __str__(self):
@@ -31,7 +37,7 @@ class TopObject:
         for key in keys:
             value = attributeMap[key]
             valueType = type(value)
-            if valueType is str or valueType is bool:
+            if valueType is str or valueType is bool or valueType is np.bool:
                 toReturn += "\n" + key + ": " + str(value)
             elif valueType is list or valueType is np.ndarray:
                 if len(value) > 0 and type(value[0]) is np.ndarray:
@@ -50,8 +56,12 @@ class TopObject:
                 toReturn += "\n" + key + ": " + str(valueType)
         return toReturn
 
-    # Initialize AnnData object
-    def setAnnObject(self, useAverage=False):
+    # Copy the object into a new instance
+    def copy(self):
+        return deepcopy(self)
+
+    # Initialize AnnData object, metadata, df, and process it
+    def setup(self, useAverage=False, skipProcess=False):
         print("Setting AnnData object...")
         if not hasattr(self, "annObject"):
             self.annObject = sc.read_h5ad(self.filePath)
@@ -59,17 +69,18 @@ class TopObject:
             self.annObject.var_names_make_unique()
         self.setMetadata()
         self.setDF()
-        self.processDataset(useAverage=useAverage)
+        if not skipProcess:
+            self.processDataset(useAverage=useAverage)
 
     # Set AnnData object to include or exclude cells with certain labels
     def filterAnnObject(self, toKeep=None, toExclude=None, keep=False, exclude=False):
         print("Filtering AnnData...")
         if keep:
-            if toKeep is None:
+            if toKeep is None or toKeep == "":
                 toKeep = self.toKeep
             self.annObject = self.annObject[self.annotations.isin(toKeep)]
         if exclude:
-            if toExclude is None:
+            if toExclude is None or toExclude == "":
                 toExclude = self.toExclude
             self.annObject = self.annObject[~self.annotations.isin(toExclude)]
         self.setMetadata()
@@ -80,12 +91,9 @@ class TopObject:
         self.metadata = self.annObject.obs
         self.annotations = self.metadata[self.cellTypeColumn]
         self.filteredAnnotations = [label if (label in self.toKeep and label not in self.toExclude) else "Other" for label in self.annotations]
-        self.kwargs = {'s': 40,
-                       'style': self.filteredAnnotations
-        }
         self.timeSortFunction = None
         self.timesSorted = None
-        if self.timeColumn is not None:
+        if self.timeColumn is not None and self.timeColumn != "":
             self.timeSortFunction = lambda time: int("".join([char for char in time if char.isdigit()])) # if numbers in string unrelated to time this won't work
             self.timesSorted = sorted([str(time) for time in set(self.metadata[self.timeColumn])], key=self.timeSortFunction)
 
@@ -95,8 +103,10 @@ class TopObject:
         if self.raw or raw:
             self.df = pd.DataFrame(self.annObject.raw.X.toarray(), index = self.metadata.index, columns = self.annObject.raw.var_names).T
         else:
-            if layer is None:
+            if layer is None or layer == "":
                 layer = self.layer
+                if layer == "":
+                    layer = None
             self.df = self.annObject.to_df(layer=layer).T
         if self.duplicates or duplicates:
             self.df = self.df.drop_duplicates().groupby(level=0).mean()
@@ -116,75 +126,95 @@ class TopObject:
         return projection
 
     # Using any dataset with well-defined clusters, set it as a basis
-    def setBasis(self, useAllCells=True):
+    def setBasis(self, testing=False):
         print("Setting basis...")
         # Count the number of cells per type
-        type_counts = self.annotations.value_counts()
+        typeCounts = self.annotations.value_counts()
 
         # Using fewer than 150-200 cells leads to nonsensical results, due to noise. More cells -> less sampling error
         threshold = 200 # only use cell types with at least this many cells (but use all cells for training)
-        types_above_threshold = type_counts[type_counts > threshold].index
-        basis_list = []
-        training_IDs = []
+        types_above_threshold = typeCounts[typeCounts > threshold].index
+        basisList = []
+        trainingIDs = []
         rng = np.random.default_rng()
         for cell_type in tqdm(types_above_threshold):
             cell_IDs = self.metadata[self.annotations == cell_type].index
-            if not useAllCells:
+            if testing:
                 current_IDs = rng.choice(cell_IDs, size=threshold, replace=False) # This line is for using only the threshold number of cells for the reference basis. This can be useful for testing the accuracy of the basis, but it performs notably worse in accuracy metrics compared to using all possible cells.
             else:
                 current_IDs = cell_IDs
             cell_data = self.df[current_IDs]
-            training_IDs += [current_IDs] # Keep track of training_IDs so that you can exclude them if you want to test the accuracy
+            trainingIDs += [current_IDs] # Keep track of training_IDs so that you can exclude them if you want to test the accuracy
 
             # Average across the cells and process them using the scTOP processing method
             processed = top.process(cell_data, average=True)
-            basis_list += [processed]
+            basisList += [processed]
 
-        training_IDs = np.concatenate(training_IDs)
-        self.basis = pd.concat(basis_list, axis=1)
-        self.basis.columns = types_above_threshold
-        self.basis.index.name = "gene"
-        test_IDs = np.setdiff1d(self.df.columns, training_IDs)
-        # test_IDs = training_IDs
-        self.split_IDs = np.array_split(test_IDs, 10) # From Maria- "I split this test dataset because it's very large and took up a lot of memory -- you don't need to do this if you have enough memory to test the entire dataset at once"
+        trainingIDs = np.concatenate(trainingIDs)
+        basis = pd.concat(basisList, axis=1)
+        basis.columns = types_above_threshold
+        basis.index.name = "gene"
         print("Basis set!")
-        return self.basis
+        if testing:
+            return basis, trainingIDs
+        self.basis = basis
+        return basis
 
     # Add the desired columns of a smaller basis to a primary basis
-    def combineBases(self, otherBasis, colsToKeep, useAllCells=True, combinedBasisName="Combined"):
+    def combineBases(self, otherBasis, firstKeep=None, firstRemove=None, secondKeep=None, secondRemove=None, combinedBasisName="Combined", firstIsPrimary=True):
         print("Combining bases...")
-        self.setBasis(useAllCells=useAllCells)
-        if otherBasis.isinstance(TopObject):
-            otherBasis.setBasis(useAllCells=useAllCells)
+        if self.basis is None:
+            self.setBasis()
+        if isinstance(otherBasis, TopObject):
+            otherBasis.setBasis()
             basis2 = otherBasis.basis
         else:
             basis2 = otherBasis
-        self.basis.index.name = basis2.index.name
+        basis1 = self.basis
+        if basis1.index.name is None:
+            basis1.index.name = "gene"
+        basis2.index.name = basis1.index.name
         if not hasattr(self, "combinedBases"):
             self.combinedBases = {}
-        combinedBasis = pd.merge(self.basis, basis2[colsToKeep], on=self.basis.index.name, how="inner")
-        return self.combinedBases[combinedBasisName]
+        if firstKeep is not None:
+            basis1 = basis1[firstKeep]
+        if firstRemove is not None:
+            basis1 = basis1[[col for col in basis1.columns if col not in firstRemove]]
+        if secondKeep is not None:
+            basis2 = basis2[secondKeep]
+        if secondRemove is not None:
+            basis2 = basis2[[col for col in basis1.columns if col not in secondRemove]]
+        combinedBasis = pd.merge(basis1, basis2, on=basis1.index.name, how="inner")
+        self.combinedBases[combinedBasisName] = combinedBasis
+        return combinedBasis
 
     # Test an existing basis (not combined). Optionally adjust the minimum accuracy threshold
     def testBasis(self, specification_value=0.1):
+
+        # Setting basis with holdouts for testing
+        basis, trainingIDs = self.setBasis(testing=True)
+        test_IDs = np.setdiff1d(self.df.columns, trainingIDs)
+        testCount = len(test_IDs)
+        splitIDs = np.array_split(test_IDs, 10) # From Maria- "I split this test dataset because it's very large and took up a lot of memory -- you don't need to do this if you have enough memory to test the entire dataset at once"
+
         print("Processing test data...")
         accuracies = {'top1': 0,
                       'top3': 0,
                       'unspecified': 0}
         matches = {}
         misses = {}
-        for sample_IDs in tqdm(self.split_IDs):
+        for sample_IDs in tqdm(splitIDs):
             test_data = self.df[sample_IDs]
             test_processed = top.process(test_data)
-            test_projections = top.score(self.basis, test_processed)
-            accuracies, matches, misses = self.scoreProjections(accuracies, matches, misses, test_projections, self.metadata, self.cellTypeColumn, specification_value=specification_value)
+            test_projections = top.score(basis, test_processed)
+            accuracies, matches, misses = self.scoreProjections(accuracies, matches, misses, test_projections, specification_value=specification_value)
             del test_data
             del test_processed
             del test_projections
         for key, value in accuracies.items():
-            # print("{}: {}".format(key, value/len(test_IDs)))
-            print("{}: {}".format(key, value / (10 * len(split_IDs))))
+            print("{}: {}".format(key, value / testCount))
 
+        accuracies["Total test count"] = testCount
         self.testResults = (accuracies, matches, misses)
         return self.testResults
 
@@ -228,10 +258,12 @@ class TopObject:
 
     # Create correlation matrix between cell types of basis, helpful to determine if any features are overlapping
     def getBasisCorrelations(self):
+        print("Getting correlations...")
         if self.basis is None:
             print("Basis must be set first!")
             return None
         self.corr = self.basis.corr()
+        print("Done!")
         return self.corr
 
 

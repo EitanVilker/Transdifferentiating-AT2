@@ -97,7 +97,7 @@ def writeAnnDataObject(annDataObj, outFile):
     if obj.raw is not None:
         obj._raw._var.rename(columns={'_index': 'index'}, inplace=True)    
         obj.raw.var.index.name(columns={'_index': 'index'}, inplace=True)    
-        obj.write_h5ad(outFile)
+    obj.write_h5ad(outFile)
     print("Finished!")
 
 
@@ -267,14 +267,13 @@ def plot_top(projections, tSNE_data, minimum_cells=50, ax=None, **kwargs):
                     )
 
 
-# Create scatter plot showing projection scores for two cell types, with the option to
-# color according to marker gene
+# Create scatter plot showing projection scores for two cell types, with the option to color according to marker gene
 def plot_two(projections, celltype1, celltype2,
              gene=None, plotMultiple=False,
              geneExpressions=None, ax=None,
              annotations=None, includeCriteria=None,
              hue=None, labels=None, palette=None, markers=None, markerSize=40, 
-             similarityBounds=None, axisFontSize=10, legendFontSize=10):#, **kwargs):
+             similarityBounds=None, axisFontSize=10, legendFontSize=10):
 
     # Filter annotations and/or projections if chosen
     if includeCriteria is not None:
@@ -289,41 +288,15 @@ def plot_two(projections, celltype1, celltype2,
     y = projections.loc[celltype2]
 
     # If labeling by gene expression instead of source labels
-    if gene:
-        ax = geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, markerSize=markerSize, alpha=0.5)
-        # if hue is None:
-        #     print("Hue not inputted!")
-        #     return None
-        # palette = create_colorbar(gene_expressions.loc[gene],
-        #                           '{} expression'.format(gene), ax=ax)
-
-        # plot = sns.scatterplot(x=x,
-        #                        y=y,
-        #                        hue=gene_expressions.loc[gene],
-        #                        palette=palette,
-        #                        alpha=0.5,
-        #                        ax=ax,
-        #                        **kwargs
-        #                        )
-        # plot.legend_.remove()
-
+    if gene is not None:
+        ax = geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, palette, markerSize=markerSize, alpha=0.5)
     elif plotMultiple:
         if palette is None or markers is None or labels is None:
             print("Palette or markers or labels not inputted!")
             return None
         ax = sourceLabelPlotMultiple(ax, x, y, annotations, labels, palette, markers, markerSize=markerSize, axisFontSize=axisFontSize, legendFontSize=legendFontSize)
-
     else:
         ax = sourceLabelPlotSingle(ax, x, y, annotations, labels, legendFontSize=legendFontSize, markerSize=markerSize, alpha=0.5)
-
-        # if palette is None or markers is None or labels is None:
-        #     # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
-        #     plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, s=40) #**kwargs)
-        #     plt.legend(bbox_to_anchor=(1,1))
-        # else:
-        #     # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-        #     plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-        # ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
 
     ax.axvline(x=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
     ax.axhline(y=0.1, color='black', linestyle='--', linewidth=0.5, dashes=(5, 10))
@@ -332,15 +305,11 @@ def plot_two(projections, celltype1, celltype2,
         ax.set_xlim(similarityBounds[0], similarityBounds[1])
         ax.set_ylim(similarityBounds[0], similarityBounds[1])
 
-    # return sns.color_palette()
     return ax
 
 
 # Craetes a Seaborn 2D scatter plot using projections onto basis columns as axes and gene expressions to identify points. Helper for plot_two
 def geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, palette, markerSize=40, alpha=0.5):
-    if annotations is None or geneExpressions is None:
-        print("Hue or gene expressions not inputted!")
-        return None
     palette = create_colorbar(geneExpressions.loc[gene],
                               '{} expression'.format(gene), ax=ax)
 
@@ -369,16 +338,26 @@ def sourceLabelPlotSingle(ax, x, y, annotations, labels, legendFontSize=10, mark
 # Craetes a Seaborn 2D scatterplot using projections onto basis columns as axes and source labels to identify points
 def sourceLabelPlotMultiple(ax, x, y, annotations, labels, palette, markers, markerSize=40, axisFontSize=16, legendFontSize=16, alpha=0.5):
     # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
+    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, hue_order=labels, style_order=labels, markers=markers, s=markerSize, palette=palette)
+    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, hue_order=labels, style_order=labels, markers=markers, s=markerSize, palette=palette)
     ax.legend(title="Source Labels", title_fontsize=axisFontSize, fontsize=legendFontSize, loc="upper right")
     return ax
 
 
 # Plot multiple 2D similarity plots at once based on some field, such as time (Note: figure out difference if any between labels and annotations[toInclude])
-def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCategory, subsetNames, 
-                      similarityBounds=None,
+def plot_two_multiple(topObject, projections, celltype1, celltype2, annotations=None, subsetCategory=None, subsetNames=None, 
+                      includeCriteria=None, similarityBounds=None,
                       axisFontSize=16, legendFontSize=16, 
                       gene=None, sourceData=None):
+
+    if annotations is None:
+        annotations = topObject.annotations
+        if includeCriteria is not None:
+            annotations = annotations[includeCriteria]
+    if subsetCategory is None:
+        subsetCategory = topObject.metadata[topObject.timeColumn]
+    if subsetNames is None:
+        subsetNames = topObject.timesSorted
 
     # Get subplots
     subsetCount = len(subsetNames)
@@ -402,24 +381,25 @@ def plot_two_multiple(projections, celltype1, celltype2, annotations, subsetCate
             fig.delaxes(ax)
             continue
         subset = subsetNames[i]
-        toInclude = np.logical_and(annotations!='Other', subsetCategory==subset)
-        # toInclude = subsetCategory==subset
-        if sourceData is not None:
-            geneExpressions = sourceData.loc[:, toInclude]
+        toInclude = np.logical_and(subsetCategory==subset, includeCriteria)
+
+        if gene is not None:
+            geneExpressions = topObject.processedData.loc[:, toInclude]
         else:
             geneExpressions = None
+
         ax = plot_two(
                 projections.loc[:, toInclude],
                 celltype1, celltype2,
                 ax=ax,
-                hue=annotations[toInclude],
+                # annotations=annotations[toInclude],
+                annotations=annotations[subsetCategory==subset],
                 labels=labels,
                 palette=labelColorMap, markers=labelMarkerMap,
                 similarityBounds=similarityBounds,
                 axisFontSize=axisFontSize, legendFontSize = legendFontSize,
-                s=60, style=annotations[toInclude],
                 gene=gene, plotMultiple=True,
-                gene_expressions=geneExpressions
+                geneExpressions=geneExpressions
         )
         ax.set_xlabel(celltype1, fontsize=16)
         ax.set_ylabel(celltype2, fontsize=16)
@@ -736,11 +716,8 @@ def similarityBoxplot(ax, similarityMap, sourceKeep=None, basisKeep=None, groupL
 
 
 # Display correlation matrix
-def plotCorrelationMatrix(corr, title="Basis Column Correlations"):
-    plt.imshow(corr, cmap='plasma')
-    plt.colorbar()
-    ticks = range(len(corr.index))
-    plt.xticks(ticks, corr.index, rotation=90)
-    plt.yticks(ticks, corr.index)
+def plotCorrelationMatrix(corr, title="Basis Column Correlations", textSize=5):
+    sns.heatmap(corr, annot=True, fmt=".2f", cmap='plasma',
+            annot_kws={"size": textSize}, cbar=True)
+    plt.xticks(rotation=90)
     plt.title(title)
-    plt.show()
