@@ -10,10 +10,12 @@ from tqdm import tqdm
 import inspect
 from copy import deepcopy
 
+
 class TopObject:
     def __init__(self, name, manualInit=False, useAverage=False, skipProcess=False, dataset="/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/DatasetInformation.csv"):
         self.name = name
-        datasetInfo = pd.read_csv(dataset, index_col="Name", keep_default_na=False).loc[name, :]
+        self.dataset = dataset
+        datasetInfo = pd.read_csv(self.dataset, index_col="Name", keep_default_na=False).loc[self.name, :]
         if len(datasetInfo) > 1:
             self.cellTypeColumn, self.toKeep, self.toExclude, self.filePath, self.timeColumn, self.duplicates, self.raw, self.layer = datasetInfo
         else:
@@ -62,8 +64,8 @@ class TopObject:
 
     # Initialize AnnData object, metadata, df, and process it
     def setup(self, useAverage=False, skipProcess=False):
-        print("Setting AnnData object...")
         if not hasattr(self, "annObject"):
+            print("Setting AnnData object...")
             self.annObject = sc.read_h5ad(self.filePath)
         if self.duplicates:
             self.annObject.var_names_make_unique()
@@ -267,61 +269,25 @@ class TopObject:
         return self.corr
 
 
-# Get the info needed to load the specific dataset
-def getDatasetSpecificInfo(dataset):
-    timeColumn = None
-    toExclude = []
-    duplicates = False
-    raw = False
-    layer = None
+def addToDataset(dataset, name, cellTypeColumn=None, toKeep=None, toExclude=None, filePath=None, timeColumn=None, duplicates=None, raw=None, layer=None):
+    datasetInfo = pd.read_csv(dataset, index_col="Name", keep_default_na=False)
+    possibleEntries = [cellTypeColumn, toKeep, toExclude, filePath, timeColumn, duplicates, raw, layer]
+    entryCount = len(possibleEntries)
+    alreadyPresent = name in datasetInfo.index
+    if alreadyPresent:
+        newEntry = datasetInfo.loc[name, :].copy()
+    else:
+        newEntry = pd.Series([None] * entryCount)
 
-    if dataset == "Kostas":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kostas/Kostas.h5ad"
-        cellTypeColumn = "cell_type_epithelial_mesenchymal_final"
-        toKeep = ["AT1", "AT2", "AT2 activated", "Proliferating", "Transitional epithelial"]
-    elif dataset == "Riemondy":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Riemondy.h5ad"
-        cellTypeColumn = "labeled_clusters"
-        toKeep =  ["Basal", "Injured Type II", "Naive Type I", "Naive Type II", "Transdifferentiating Type II", "Cell Cycle Arrest Type II", "Proliferating Type II"]
-    elif dataset == "Strunz":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/StrunzAnnData.h5ad"
-        cellTypeColumn = "cell_type"
-        toKeep = ["AT2", "AT2 activated", "Krt8+ ADI", "AT1", "Basal", "Mki67+ Proliferation"]
-        timeColumn = "time_point"
-    elif dataset == "Choi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Choi/celltype_1_Epi_v4_merged_AT2.h5ad"
-        cellTypeColumn = "celltype_4"
-        toKeep =  ["AT1", "AT2", "Primed", "Intermediate", "Cycling AT2"]
-        duplicates = True
-    elif dataset == "Kobayashi":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/KobayashiAnnData.h5ad"
-        cellTypeColumn = "cell_type"
-        toKeep = ["AEC1", "AEC2", "Ctgf+", "AEC2-proliferating", "Lgals3+"]
-    elif dataset == "Kathiriya":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Kathiriya/Kathiriya.h5ad"
-        cellTypeColumn = "celltypes"
-        toKeep = [0, 1, 2, 3, 4, 5, 6]
-    elif dataset == "Habermann":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Habermann/Habermann.h5ad"
-        cellTypeColumn = "celltype"
-        toKeep = ["AT1", "AT2", "KRT5-/KRT17+", "Proliferating Epithelial Cells", "Transitional AT2", "SCGB3A2+", "SCGB3A2+ SCGB1A1+"]
-    elif dataset == "Bibek":
-        filePath = "/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Bibek.h5ad"
-        cellTypeColumn = "annotation_update"
-        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
-        timeColumn = "days"
-    elif dataset == "Rawlins":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Andrea/EmmaRawlinsBasis.h5ad'
-        cellTypeColumn = 'new_celltype'
-        toKeep = ["AT1", "AT2", "Krt8 high AT2", "Activated AT2", "Ciliated", "Proliferating AT2", "Secretory"]
-    elif dataset == "Tsukui":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/BibekPneumonectomy/objects/Tsukui.h5ad'
-        cellTypeColumn = "celltype"
-        toKeep = []
-    elif dataset == "Burgess":
-        filePath = '/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Burgess/Burgess.h5ad'
-        cellTypeColumn = "new_cluster"
-        # cell_type_column = "seurat_clusters"
-        toKeep = ["CASP4+ cells", "Differentiating iAT2/iAT1", "Early iAT1s", "FGL1 high iAT2s", "iAT2s", "Late iAT1s"]
-
-    return cellTypeColumn, toKeep, toExclude, filePath, timeColumn, duplicates, raw, layer
+    for i in range(entryCount):
+        entry = possibleEntries[i]
+        if entry is not None:
+            newEntry.iat[i] = entry
+    newEntry.name = name
+    newEntry = pd.DataFrame(newEntry).T
+    if alreadyPresent:
+        datasetInfo.update(newEntry)
+    else:
+        newEntry.columns = datasetInfo.columns
+        datasetInfo = pd.concat([datasetInfo, newEntry], ignore_index=False)
+    datasetInfo.to_csv(dataset, index=True)

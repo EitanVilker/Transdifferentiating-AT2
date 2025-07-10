@@ -282,6 +282,9 @@ def plot_two(projections, celltype1, celltype2,
         if projections is not None:
             projections = projections.loc[:, includeCriteria]
 
+    if labels is None:
+        labels = [str(label) for label in set(annotations)]
+
     # Set axes for current plot
     ax = ax or plt.gca()
     x = projections.loc[celltype1]
@@ -328,17 +331,13 @@ def geneExpressionPlot(ax, x, y, gene, geneExpressions, annotations, palette, ma
 
 # Craetes a Seaborn 2D scatterplot using projections onto basis columns as axes and source labels to identify points
 def sourceLabelPlotSingle(ax, x, y, annotations, labels, legendFontSize=10, markerSize=40, alpha=0.5):
-    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, **kwargs)
-    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, s=markerSize) #**kwargs)
-    # plt.legend(bbox_to_anchor=(1,1))
+    plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, hue_order=labels, style_order=labels, s=markerSize) #**kwargs)
     ax.legend(title="Source Labels", title_fontsize=legendFontSize, fontsize=legendFontSize, loc="upper right")
     return ax
 
 
 # Craetes a Seaborn 2D scatterplot using projections onto basis columns as axes and source labels to identify points
 def sourceLabelPlotMultiple(ax, x, y, annotations, labels, palette, markers, markerSize=40, axisFontSize=16, legendFontSize=16, alpha=0.5):
-    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=hue, hue_order=labels, style_order=labels, markers=markers, palette=palette, **kwargs)
-    # plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, hue_order=labels, style_order=labels, markers=markers, s=markerSize, palette=palette)
     plot = sns.scatterplot(x=x, y=y, alpha=0.5, ax=ax, hue=annotations, style=annotations, hue_order=labels, style_order=labels, markers=markers, s=markerSize, palette=palette)
     ax.legend(title="Source Labels", title_fontsize=axisFontSize, fontsize=legendFontSize, loc="upper right")
     return ax
@@ -368,7 +367,8 @@ def plot_two_multiple(topObject, projections, celltype1, celltype2, annotations=
     # Set up label colors and shapes
     colors = list(sns.color_palette("bright")) + list(sns.color_palette())
     markers = ["X", "o", "^", "s", "d", "p", "*",  "<", ">", "v", "H", "h", "D", "x", ".", ",", "1", "2", "3", "4", "+", "|", "_"]
-    labels = [str(label) for label in set(annotations) if label != "Other"]
+    # labels = [str(label) for label in set(annotations) if label != "Other"]
+    labels = [str(label) for label in set(annotations)]
     labelColorMap = {}
     labelMarkerMap = {}
     for i in range(len(labels)):
