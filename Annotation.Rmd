@@ -1,0 +1,25 @@
+```{r Libraries}
+library(Azimuth) # 0.5.0
+library(glmGamPoi)
+library(Seurat)
+library(future)
+plan("multisession", workers = 4)
+options(future.globals.maxSize = 15000 * 1024^2)
+```
+
+
+```{r Set Reference}
+# for mouse
+dir_ref <- "/restricted/projectnb/crem-bioinfo/reference_data/REFERENCES/Azimuth/pansci_full/"
+# for human lung
+# dir_ref <- "/restricted/projectnb/crem-bioinfo/reference_data/REFERENCES/Azimuth/lungref.SeuratData/azimuth/"
+# sc <- readRDS("/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/OutsidePaperObjects/Seurat/StrunzSeurat.rds")
+rownames(sc@assays$RNA@meta.features) <- gsub(pattern = "_", replacement = "-", x = rownames(sc@assays$RNA@meta.features))
+# sc@reductions <- list()
+# sc <- JoinLayers(sc, assay = "RNA")
+# sc <- SCTransform(sc, verbose = FALSE)
+sc <- RunAzimuth(sc, reference = dir_ref)
+```
+
+
+
