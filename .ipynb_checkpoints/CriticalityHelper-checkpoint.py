@@ -32,8 +32,12 @@ def filterDFByMinimumGeneExpression(df, includeCriteria=None, threshold=0):
     return df.loc[[val > threshold for val in df.mean(axis=1)], :]
 
 
-def filterDFByGeneVariance(df, threshold=0.01):
-    return df.loc[df.var(axis=1) > threshold, :]
+def filterDFByGeneVariance(df, threshold=0.01, proportionKept=None):
+    variance = df.var(axis=1)
+    if proportionKept is not None:
+        lowerQuantile = np.quantile(variance, 1 - proportionKept)
+        return df.loc[variance > lowerQuantile, :]
+    return df.loc[variance > threshold, :]
 
 
 def filterDFByTimeAndCluster(df, timeName, timeValues, clusterName, clusterValues, negative=False):
@@ -258,6 +262,8 @@ def getDifferentiallyExpressedGenes(annObject, differentialColumn, case, individ
                 filteredAnnObject = annObjectCopy[annotations.isin([case, comparisonGroup])].copy()
                 sc.tl.rank_genes_groups(filteredAnnObject, differentialColumn, method='wilcoxon', use_raw=useRaw, copy=False)
                 diffTableMap[comparisonGroup] = sc.get.rank_genes_groups_df(filteredAnnObject, group=case).set_index("names")
+        del annObjectCopy
+        del filteredAnnObject
         print("Done!")
         return diffTableMap
 
@@ -269,7 +275,7 @@ def getDifferentiallyExpressedGenes(annObject, differentialColumn, case, individ
 
 
 # Given a DEG table, filter table to genes meeting certain conditions
-def getTopGenes(diffTable, minimumFoldChange=2, outFile=None, surfaceGeneFile="/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Transdifferentiation/CellSurfaceGenes.txt", checkSurface=False, requireOverexpression=False):
+def getTopGenes(diffTable, minimumFoldChange=2, outFile=None, surfaceGeneFile="/restricted/projectnb/crem-trainees/Kotton_Lab/Eitan/Transdifferentiation/subcellular_location.tsv", sep="\t", checkSurface=False, requireOverexpression=False):
     
     # Set conditions for differential expression
     logFoldChanges = diffTable['logfoldchanges'] if requireOverexpression else diffTable['logfoldchanges'].abs()
@@ -277,8 +283,8 @@ def getTopGenes(diffTable, minimumFoldChange=2, outFile=None, surfaceGeneFile="/
 
     # Set condition for surface genes
     if checkSurface:
-        cellSurfaceGenes = pd.read_csv(surfaceGeneFile)
-        conditions.append(diffTable.index.isin(cellSurfaceGenes.columns))
+        cellSurfaceGenes = pd.read_csv(surfaceGeneFile, sep=sep)
+        conditions.append(diffTable.index.isin(cellSurfaceGenes.loc[cellSurfaceGenes["Main location"] == "Plasma membrane", :]["Gene name"]))
 
     # Apply all conditions
     combinedCondition = conditions[0]
@@ -292,14 +298,14 @@ def getTopGenes(diffTable, minimumFoldChange=2, outFile=None, surfaceGeneFile="/
 
 
 # Given DEG between a group and each other, get table of genes with high expression and universal high differential expression
-def getCombinedTopGenes(diffTableMap, df, includeCriteria=None, expressionThreshold=1, missesAllowed=0, outFile=None, checkSurface=False, requireOverexpression=False):
-    if includeCriteria is not None: # Usually filter to the case
+def getCombinedTopGenes(diffTableMap, df, includeCriteria=None, expressionThreshold=1, missesAllowed=0, outFile=None, checkSurface=False, requireOverexpression=False, minimumFoldChange=2):
+    if includeCriteria is not None: # Usually filter to the case, as in annotations == target
         df = df.loc[:, includeCriteria]
 
     allGenes = pd.DataFrame(index=df.index)
     comparisonGroups = list(diffTableMap.keys())
     for group in comparisonGroups:
-        validGenes = getTopGenes(diffTableMap[group], checkSurface=checkSurface, requireOverexpression=requireOverexpression).index
+        validGenes = getTopGenes(diffTableMap[group], checkSurface=checkSurface, requireOverexpression=requireOverexpression, minimumFoldChange=minimumFoldChange).index
         valid = [int(val in validGenes) for val in df.index]
         allGenes[group] = valid
 
@@ -314,10 +320,11 @@ def getCombinedTopGenes(diffTableMap, df, includeCriteria=None, expressionThresh
         DEG = diffTableMap[group].loc[:, "logfoldchanges"].copy().rename("logfoldchanges " + group)
         targetDF = targetDF.join(DEG, how="left", rsuffix=group)
 
-    if outFile is not None:
-        targetDF.to_csv(outFile)
     if missesAllowed > 0:
         targetDF = targetDF.join(allGenes["Successes"], how="left")
+    if outFile is not None:
+        targetDF.to_csv(outFile)
+
     return targetDF
 
 
@@ -417,6 +424,7 @@ def getQuantileData(df, includeCriteria=None, quantile=0.8, quantileMin=None, mi
 
 # Find shortest distance between n-dimensional points
 def getMinimumDistance(df1, df2, metric='euclidean'):
+    metric = "cosine"
     distances = cdist(df1.values.T, df2.values.T, metric=metric)
     return np.min(distances), np.unravel_index(np.argmin(distances), distances.shape)
 
